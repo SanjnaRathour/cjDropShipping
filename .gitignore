@@ -1,0 +1,8 @@
+.env
+data/token.json
+data/daily_pick.json
+data/last_scan.json
+data/last_raw_search.json
+__pycache__/
+*.pyc
+.venv/

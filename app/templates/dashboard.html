@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirthovia — Product Scanner</title>
+  <style>
+    :root { --coral: #FF8FA3; --yellow: #FFD166; --mint: #8ECFC1; --ink: #3a2e2e; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fff8f0; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin-bottom: 4px; }
+    .sub { color: #8a7a7a; margin-top: 0; }
+    .sub a { color: var(--ink); }
+    .panel { background: #fff; border-radius: 16px; padding: 16px 20px; box-shadow: 0 6px 24px rgba(0,0,0,0.06); margin-bottom: 20px; }
+    .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    button.run-btn { background: var(--coral); color: #fff; border: none; border-radius: 999px; padding: 11px 22px; font-weight: 700; cursor: pointer; font-size: 0.95rem; }
+    button.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .badge { padding: 4px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+    .badge.idle { background: #eee; color: #777; }
+    .badge.running { background: #fff3cd; color: #8a6d00; }
+    .badge.done { background: #e3fcef; color: #0a7a46; }
+    .badge.error { background: #ffe3e3; color: #a32020; }
+    #log { margin-top: 10px; background: #15171c; color: #d7d4c8; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 8px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; display: none; }
+
+    h2.section { font-size: 1rem; margin: 24px 0 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .card { background: #fff; border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.06); overflow: hidden; border: 2px solid var(--yellow); display: flex; flex-direction: column; }
+    .card img { width: 100%; height: 160px; object-fit: cover; background: #f3f3f3; }
+    .card-body { padding: 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .cat-tag { font-size: 0.65rem; text-transform: uppercase; color: #b48a3c; font-weight: 700; letter-spacing: 0.04em; }
+    .product-name { font-size: 0.9rem; font-weight: 700; margin: 0; line-height: 1.3; min-height: 2.4em; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+    .stat .label { font-size: 0.62rem; text-transform: uppercase; color: #a89; }
+    .stat .value { font-size: 0.9rem; font-weight: 700; }
+    .margin .value { color: #2a9d6f; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+    .actions a, .actions button { flex: 1; text-align: center; font-size: 0.72rem; font-weight: 700; padding: 7px 6px; border-radius: 8px; text-decoration: none; border: none; cursor: pointer; }
+    .a-view { background: #eee; color: var(--ink); }
+    .a-dl { background: var(--mint); color: #063; }
+    .a-caption { background: #e8e0ff; color: #432a8a; }
+    .a-order { background: var(--coral); color: #fff; }
+    .empty { color: #9a8a8a; padding: 20px; text-align: center; }
+    .nav { margin-top: 20px; }
+    .nav a { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎀 Mirthovia — Product Scanner</h1>
+    <p class="sub">Finds top profitable + cute products across CJ · <a href="/orders">View all orders →</a></p>
+
+    <div class="panel">
+      <div class="controls">
+        <button class="run-btn" id="runBtn" onclick="runScan()">🔍 Run new scan</button>
+        <span>Status: <span class="badge idle" id="statusBadge">{{ status }}</span></span>
+        <span id="statusMsg"></span>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    {% if not data %}
+      <p class="empty">No scan results yet — click "Run new scan" above. This takes a few minutes (CJ rate-limits to ~1 call/sec and each product needs a variant + shipping lookup).</p>
+    {% else %}
+      <p class="sub">Last scan: {{ data.generated_at }}</p>
+
+      <h2 class="section">🏆 Top overall</h2>
+      <div class="grid">
+        {% for p in data.top_overall %}
+        <div class="card">
+          {% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}
+          <div class="card-body">
+            <div class="cat-tag">{{ p.category }}</div>
+            <p class="product-name">{{ p.name }}</p>
+            <div class="stats">
+              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }}</div></div>
+              <div class="stat"><div class="label">Retail</div><div class="value">${{ p.retail }}</div></div>
+              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }}</div></div>
+              <div class="stat margin"><div class="label">Worst-case margin</div><div class="value">{{ p.worst_case_margin_pct }}%</div></div>
+            </div>
+            <div class="actions">
+              <a class="a-view" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ ↗</a>
+              <a class="a-dl" href="/download-image?url={{ p.image | urlencode }}&filename={{ (p.name ~ '.jpg') | urlencode }}">⬇ Photo</a>
+              <a class="a-caption" href="/caption?name={{ p.name | urlencode }}&category={{ p.category | urlencode }}&price={{ p.retail }}" target="_blank">✨ IG caption</a>
+              <a class="a-order" href="/order?vid={{ p.vid }}&name={{ p.name | urlencode }}">Place order</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% for cat in data.categories %}
+      <h2 class="section">{{ cat.name }}</h2>
+      <div class="grid">
+        {% for p in cat.products %}
+        <div class="card">
+          {% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}
+          <div class="card-body">
+            <p class="product-name">{{ p.name }}</p>
+            <div class="stats">
+              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }}</div></div>
+              <div class="stat"><div class="label">Retail</div><div class="value">${{ p.retail }}</div></div>
+              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }}</div></div>
+              <div class="stat margin"><div class="label">Worst-case margin</div><div class="value">{{ p.worst_case_margin_pct }}%</div></div>
+            </div>
+            <div class="actions">
+              <a class="a-view" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ ↗</a>
+              <a class="a-dl" href="/download-image?url={{ p.image | urlencode }}&filename={{ (p.name ~ '.jpg') | urlencode }}">⬇ Photo</a>
+              <a class="a-caption" href="/caption?name={{ p.name | urlencode }}&category={{ p.category | urlencode }}&price={{ p.retail }}" target="_blank">✨ IG caption</a>
+              <a class="a-order" href="/order?vid={{ p.vid }}&name={{ p.name | urlencode }}">Place order</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  <script>
+    let polling = null;
+
+    function setStatus(status, msg) {
+      const badge = document.getElementById("statusBadge");
+      badge.className = "badge " + status;
+      badge.textContent = status;
+      document.getElementById("statusMsg").textContent = msg || "";
+    }
+
+    function runScan() {
+      const btn = document.getElementById("runBtn");
+      const logBox = document.getElementById("log");
+      btn.disabled = true;
+      logBox.style.display = "block";
+      logBox.textContent = "";
+
+      fetch("/scan/run", { method: "POST" })
+        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) { setStatus("error", r.message); btn.disabled = false; return; }
+          if (polling) clearInterval(polling);
+          polling = setInterval(poll, 1500);
+        })
+        .catch(() => { setStatus("error", "Could not reach local server"); btn.disabled = false; });
+    }
+
+    function poll() {
+      fetch("/scan/status").then(r => r.json()).then(data => {
+        setStatus(data.status, data.error || "");
+        document.getElementById("log").textContent = data.logs.join("\\n");
+        const logBox = document.getElementById("log");
+        logBox.scrollTop = logBox.scrollHeight;
+
+        if (data.status === "done" || data.status === "error") {
+          clearInterval(polling);
+          document.getElementById("runBtn").disabled = false;
+          if (data.status === "done") location.reload();
+        }
+      });
+    }
+
+    setStatus("{{ status }}", "");
+  </script>
+</body>
+</html>

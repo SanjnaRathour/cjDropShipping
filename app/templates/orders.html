@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirthovia — Orders</title>
+  <style>
+    :root { --coral: #FF8FA3; --yellow: #FFD166; --mint: #8ECFC1; --ink: #3a2e2e; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fff8f0; color: var(--ink); margin: 0; padding: 32px 16px; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 1.3rem; }
+    .filters { display: flex; gap: 10px; align-items: end; margin-bottom: 18px; }
+    .filters label { font-size: 0.75rem; font-weight: 700; display: block; margin-bottom: 4px; }
+    .filters select { padding: 8px 10px; border-radius: 8px; border: 2px solid #eee; font-size: 0.9rem; }
+    .filters button { padding: 9px 16px; border-radius: 8px; border: none; background: var(--ink); color: #fff; font-weight: 700; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,0.06); }
+    th, td { text-align: left; padding: 10px 12px; font-size: 0.85rem; border-bottom: 1px solid #f3ece4; }
+    th { background: #fff3e0; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.04em; color: #8a7a7a; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+    .badge.unshipped { background: #fff3cd; color: #8a6d00; }
+    .badge.delivered { background: #e3fcef; color: #0a7a46; }
+    .badge.created, .badge.in_cart { background: #e8f0ff; color: #2a4d9a; }
+    .badge.cancelled { background: #ffe3e3; color: #a32020; }
+    .badge.other { background: #eee; color: #555; }
+    .actions form { display: inline; }
+    .actions button { font-size: 0.75rem; padding: 6px 10px; border-radius: 8px; border: none; cursor: pointer; margin-right: 4px; }
+    .btn-confirm { background: var(--mint); color: #063; }
+    .btn-cancel { background: var(--coral); color: #fff; }
+    .notice { background: #eef; border: 2px solid #ccd; border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.9rem; }
+    .error-box { background: #fff0f0; border: 2px solid #ffc1c1; border-radius: 14px; padding: 16px; color: #8a2a2a; margin-bottom: 18px; }
+    a.back { display: inline-block; margin-top: 18px; color: var(--ink); }
+    .hint { font-size: 0.78rem; color: #9a8a8a; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📋 Orders</h1>
+    <p class="hint">
+      "Confirm" moves a CREATED order forward. "Cancel" only works while an order
+      is still CREATED or IN_CART — CJ rejects cancellation once it's paid/processing,
+      and there's no other way to stop it at that point.
+    </p>
+
+    {% if action_result %}
+      <div class="notice">{{ action_result }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="error-box"><strong>Couldn't load orders.</strong><p>{{ error }}</p></div>
+    {% endif %}
+
+    <form class="filters" method="get" action="/orders">
+      <div>
+        <label>Status filter</label>
+        <select name="status">
+          {% for s in known_statuses %}
+            <option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s if s else "All" }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit">Filter</button>
+    </form>
+
+    {% if orders %}
+    <table>
+      <thead>
+        <tr>
+          <th>Order #</th>
+          <th>Status</th>
+          <th>Sub-status</th>
+          <th>Amount</th>
+          <th>Tracking</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+        <tr>
+          <td>{{ o.orderNum or o.orderId }}</td>
+          <td><span class="badge {{ (o.orderStatus or 'other') | lower }}">{{ o.orderStatus or '—' }}</span></td>
+          <td>{{ o.subStatus or '—' }}</td>
+          <td>{{ o.orderAmount or o.totalAmount or '—' }}</td>
+          <td>{{ o.trackNumber or '—' }}</td>
+          <td>{{ o.createDate or '—' }}</td>
+          <td class="actions">
+            <form method="post" action="/orders/{{ o.orderId }}/confirm">
+              <input type="hidden" name="status" value="{{ status }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <button class="btn-confirm" type="submit">Confirm</button>
+            </form>
+            <form method="post" action="/orders/{{ o.orderId }}/cancel" onsubmit="return confirm('Cancel this order on CJ?');">
+              <input type="hidden" name="status" value="{{ status }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <button class="btn-cancel" type="submit">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">Showing page {{ page }} — {{ total }} total order(s) matching this filter.</p>
+    {% elif not error %}
+      <p class="hint">No orders found for this filter.</p>
+    {% endif %}
+
+    <a class="back" href="/">← back to today's pick</a>
+  </div>
+</body>
+</html>
