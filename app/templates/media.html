@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirthovia — All media</title>
+  <style>
+    :root { --coral: #FF8FA3; --mint: #8ECFC1; --ink: #3a2e2e; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fff8f0; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
+    .wrap { max-width: 700px; margin: 0 auto; }
+    h1 { font-size: 1.2rem; }
+    .error-box { background: #fff0f0; border: 2px solid #ffc1c1; border-radius: 14px; padding: 16px; color: #8a2a2a; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .tile { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    .tile img, .tile video { width: 100%; height: 160px; object-fit: cover; display: block; background: #f3f3f3; }
+    .tile a { display: block; text-align: center; background: var(--mint); color: #063; font-size: 0.75rem; font-weight: 700; padding: 7px; text-decoration: none; }
+    .video-tile a { background: #e8e0ff; color: #432a8a; }
+    .empty { color: #9a8a8a; }
+    a.back { display: inline-block; margin-top: 10px; color: var(--ink); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🖼 All media — {{ name }}</h1>
+    {% if error %}
+      <div class="error-box"><strong>Couldn't fetch the full gallery.</strong><p>{{ error }}</p>{% if images %}<p>Showing the one image we already had instead.</p>{% endif %}</div>
+    {% endif %}
+
+    {% if video_url %}
+    <h2 style="font-size:0.9rem">Video</h2>
+    <div class="grid">
+      <div class="tile video-tile">
+        <video src="{{ video_url }}" controls preload="metadata"></video>
+        <a href="/download-image?url={{ video_url | urlencode }}&filename={{ (name ~ '.mp4') | urlencode }}">⬇ Download video</a>
+      </div>
+    </div>
+    {% endif %}
+
+    <h2 style="font-size:0.9rem">Photos ({{ images | length }})</h2>
+    {% if images %}
+    <div class="grid">
+      {% for img in images %}
+      <div class="tile">
+        <img src="{{ img }}" alt="{{ name }}">
+        <a href="/download-image?url={{ img | urlencode }}&filename={{ (name ~ '-' ~ loop.index ~ '.jpg') | urlencode }}">⬇ Download</a>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="empty">No photos found.</p>
+    {% endif %}
+
+    <a class="back" href="javascript:window.close()">← close this tab</a>
+  </div>
+</body>
+</html>

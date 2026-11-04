@@ -30,15 +30,29 @@
     .product-name { font-size: 0.9rem; font-weight: 700; margin: 0; line-height: 1.3; min-height: 2.4em; }
     .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
     .stat .label { font-size: 0.62rem; text-transform: uppercase; color: #a89; }
+    .price-note { text-transform: none; font-style: italic; color: #c08; }
+    .price-disclaimer { background: #fff3cd; border: 2px solid #ffe08a; border-radius: 10px; padding: 10px 14px; font-size: 0.82rem; color: #6b5300; margin-bottom: 16px; }
     .stat .value { font-size: 0.9rem; font-weight: 700; }
+    .stat .inr { display: block; font-size: 0.72rem; font-weight: 600; color: #a87a3c; }
     .margin .value { color: #2a9d6f; }
+    .breakeven .value { color: #a32020; }
+    .breakeven .label { color: #a32020; }
+    .price-checker { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee; }
+    .pc-input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 8px; border: 2px solid #eee; font-size: 0.78rem; margin-bottom: 4px; }
+    .price-checker button { width: 100%; background: var(--ink); color: #fff; border: none; border-radius: 8px; padding: 6px; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+    .pc-result { font-size: 0.76rem; font-weight: 700; margin-top: 4px; text-align: center; padding: 4px; border-radius: 6px; }
+    .pc-result.ok { background: #e3fcef; color: #0a7a46; }
+    .pc-result.bad { background: #ffe3e3; color: #a32020; }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
     .actions a, .actions button { flex: 1; text-align: center; font-size: 0.72rem; font-weight: 700; padding: 7px 6px; border-radius: 8px; text-decoration: none; border: none; cursor: pointer; }
     .a-view { background: #eee; color: var(--ink); }
     .a-dl { background: var(--mint); color: #063; }
     .a-caption { background: #e8e0ff; color: #432a8a; }
-    .a-order { background: var(--coral); color: #fff; }
     .empty { color: #9a8a8a; padding: 20px; text-align: center; }
+    .today-pick-banner { background: #fff3e0; border: 2px solid var(--coral); border-radius: 18px; padding: 16px; margin-bottom: 24px; }
+    .today-pick-tag { font-weight: 700; font-size: 0.85rem; margin-bottom: 10px; color: #a32020; }
+    .posted-badge { background: #e3fcef; color: #0a7a46; font-size: 0.75rem; font-weight: 700; text-align: center; padding: 7px; border-radius: 8px; margin-top: 6px; }
+    .mark-posted-btn { width: 100%; margin-top: 6px; background: #ffe9b8; color: #7a5200; border: none; border-radius: 8px; padding: 7px; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
     .nav { margin-top: 20px; }
     .nav a { color: var(--ink); }
   </style>
@@ -46,7 +60,7 @@
 <body>
   <div class="wrap">
     <h1>🎀 Mirthovia — Product Scanner</h1>
-    <p class="sub">Finds top profitable + cute products across CJ · <a href="/orders">View all orders →</a></p>
+    <p class="sub">Finds top profitable + cute products across CJ — orders and checkout are now handled on your <a href="https://mirthovia.wed2c.com" target="_blank">Mirthovia store</a></p>
 
     <div class="panel">
       <div class="controls">
@@ -60,9 +74,54 @@
     {% if not data %}
       <p class="empty">No scan results yet — click "Run new scan" above. This takes a few minutes (CJ rate-limits to ~1 call/sec and each product needs a variant + shipping lookup).</p>
     {% else %}
-      <p class="sub">Last scan: {{ data.generated_at }}</p>
+      <p class="sub">Last scan: {{ data.generated_at }} · ₹ figures use 1 USD = ₹{{ usd_to_inr }} (approximate, set in .env)</p>
+      <div class="price-disclaimer">
+        ⚠️ "Sell at" is a rough starting suggestion, not researched market pricing — it's either a guessed category
+        target price or cost × a fallback markup, neither of which knows what this exact item actually sells for
+        elsewhere. Always search the product (or a close match) online before finalizing your real price.
+      </div>
 
-      <h2 class="section">🏆 Top overall</h2>
+      {% if today_pick %}
+      <div class="today-pick-banner">
+        <div class="today-pick-tag">📅 Today's picks — post as many as you want, mark each one once it's up</div>
+        <div class="grid">
+          {% for tp in today_pick %}
+          <div class="card">
+            {% if tp.image %}<img src="{{ tp.image }}" alt="{{ tp.name }}">{% endif %}
+            <div class="card-body">
+              <div class="cat-tag">{{ tp.category }}</div>
+              <p class="product-name">{{ tp.name }}</p>
+              <div class="stats">
+                <div class="stat"><div class="label">Cost</div><div class="value">${{ tp.cost }} <span class="inr">₹{{ tp.cost_inr }}</span></div></div>
+                <div class="stat"><div class="label">Sell at <span class="price-note">({{ tp.retail_source }})</span></div><div class="value">${{ tp.retail }} <span class="inr">₹{{ tp.retail_inr }}</span></div></div>
+                <div class="stat margin"><div class="label">Worst-case profit</div><div class="value">${{ tp.worst_case_margin_usd }} ({{ tp.worst_case_margin_pct }}%) <span class="inr">₹{{ tp.worst_case_margin_inr }}</span></div></div>
+                <div class="stat breakeven"><div class="label">⚠️ Break-even (min price)</div><div class="value">${{ tp.breakeven }} <span class="inr">₹{{ tp.breakeven_inr }}</span></div></div>
+              </div>
+              <div class="price-checker">
+                <input type="number" step="0.01" placeholder="Real market price you found ($)" class="pc-input" data-breakeven="{{ tp.breakeven }}">
+                <button type="button" onclick="checkPrice(this)">Check</button>
+                <div class="pc-result"></div>
+              </div>
+              <div class="actions">
+                <a class="a-view" href="{{ tp.product_url }}" target="_blank" rel="noopener">View on CJ ↗</a>
+                <a class="a-dl" href="/download-image?url={{ tp.image | urlencode }}&filename={{ (tp.name ~ '.jpg') | urlencode }}">⬇ Photo</a>
+                <a class="a-caption" href="/caption?name={{ tp.name | urlencode }}&category={{ tp.category | urlencode }}&price={{ tp.retail }}" target="_blank">✨ IG caption</a>
+                <a class="a-media" href="/media/{{ tp.pid }}?name={{ tp.name | urlencode }}&fallback_image={{ tp.image | urlencode }}" target="_blank">🖼 All media</a>
+              </div>
+              <form method="post" action="/posted/{{ tp.pid }}">
+                <input type="hidden" name="name" value="{{ tp.name }}">
+                <button class="mark-posted-btn" type="submit" style="width:100%">📌 Mark as posted</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+        <p class="empty">Every product in today's top results has already been posted — run a new scan for fresh picks.</p>
+      {% endif %}
+
+      <h2 class="section">🏆 Top overall (all results)</h2>
       <div class="grid">
         {% for p in data.top_overall %}
         <div class="card">
@@ -71,17 +130,31 @@
             <div class="cat-tag">{{ p.category }}</div>
             <p class="product-name">{{ p.name }}</p>
             <div class="stats">
-              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }}</div></div>
-              <div class="stat"><div class="label">Retail</div><div class="value">${{ p.retail }}</div></div>
-              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }}</div></div>
-              <div class="stat margin"><div class="label">Worst-case margin</div><div class="value">{{ p.worst_case_margin_pct }}%</div></div>
+              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }} <span class="inr">₹{{ p.cost_inr }}</span></div></div>
+              <div class="stat"><div class="label">Sell at <span class="price-note">({{ p.retail_source }})</span></div><div class="value">${{ p.retail }} <span class="inr">₹{{ p.retail_inr }}</span></div></div>
+              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }} <span class="inr">₹{{ p.shipping_range_inr[0] }}–{{ p.shipping_range_inr[1] }}</span></div></div>
+              <div class="stat breakeven"><div class="label">⚠️ Break-even (min price)</div><div class="value">${{ p.breakeven }} <span class="inr">₹{{ p.breakeven_inr }}</span></div></div>
+            </div>
+            <div class="price-checker">
+              <input type="number" step="0.01" placeholder="Real market price you found ($)" class="pc-input" data-breakeven="{{ p.breakeven }}">
+              <button type="button" onclick="checkPrice(this)">Check</button>
+              <div class="pc-result"></div>
+            </div>
             </div>
             <div class="actions">
               <a class="a-view" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ ↗</a>
               <a class="a-dl" href="/download-image?url={{ p.image | urlencode }}&filename={{ (p.name ~ '.jpg') | urlencode }}">⬇ Photo</a>
               <a class="a-caption" href="/caption?name={{ p.name | urlencode }}&category={{ p.category | urlencode }}&price={{ p.retail }}" target="_blank">✨ IG caption</a>
-              <a class="a-order" href="/order?vid={{ p.vid }}&name={{ p.name | urlencode }}">Place order</a>
+              <a class="a-media" href="/media/{{ p.pid }}?name={{ p.name | urlencode }}&fallback_image={{ p.image | urlencode }}" target="_blank">🖼 All media</a>
             </div>
+            {% if p.posted_at %}
+              <div class="posted-badge">✓ Posted {{ p.posted_at[:10] }}</div>
+            {% else %}
+              <form method="post" action="/posted/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <button class="mark-posted-btn" type="submit">📌 Mark as posted</button>
+              </form>
+            {% endif %}
           </div>
         </div>
         {% endfor %}
@@ -96,17 +169,31 @@
           <div class="card-body">
             <p class="product-name">{{ p.name }}</p>
             <div class="stats">
-              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }}</div></div>
-              <div class="stat"><div class="label">Retail</div><div class="value">${{ p.retail }}</div></div>
-              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }}</div></div>
-              <div class="stat margin"><div class="label">Worst-case margin</div><div class="value">{{ p.worst_case_margin_pct }}%</div></div>
+              <div class="stat"><div class="label">Cost</div><div class="value">${{ p.cost }} <span class="inr">₹{{ p.cost_inr }}</span></div></div>
+              <div class="stat"><div class="label">Sell at <span class="price-note">({{ p.retail_source }})</span></div><div class="value">${{ p.retail }} <span class="inr">₹{{ p.retail_inr }}</span></div></div>
+              <div class="stat"><div class="label">Ship range</div><div class="value">${{ p.shipping_range[0] }}–${{ p.shipping_range[1] }} <span class="inr">₹{{ p.shipping_range_inr[0] }}–{{ p.shipping_range_inr[1] }}</span></div></div>
+              <div class="stat breakeven"><div class="label">⚠️ Break-even (min price)</div><div class="value">${{ p.breakeven }} <span class="inr">₹{{ p.breakeven_inr }}</span></div></div>
+            </div>
+            <div class="price-checker">
+              <input type="number" step="0.01" placeholder="Real market price you found ($)" class="pc-input" data-breakeven="{{ p.breakeven }}">
+              <button type="button" onclick="checkPrice(this)">Check</button>
+              <div class="pc-result"></div>
+            </div>
             </div>
             <div class="actions">
               <a class="a-view" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ ↗</a>
               <a class="a-dl" href="/download-image?url={{ p.image | urlencode }}&filename={{ (p.name ~ '.jpg') | urlencode }}">⬇ Photo</a>
               <a class="a-caption" href="/caption?name={{ p.name | urlencode }}&category={{ p.category | urlencode }}&price={{ p.retail }}" target="_blank">✨ IG caption</a>
-              <a class="a-order" href="/order?vid={{ p.vid }}&name={{ p.name | urlencode }}">Place order</a>
+              <a class="a-media" href="/media/{{ p.pid }}?name={{ p.name | urlencode }}&fallback_image={{ p.image | urlencode }}" target="_blank">🖼 All media</a>
             </div>
+            {% if p.posted_at %}
+              <div class="posted-badge">✓ Posted {{ p.posted_at[:10] }}</div>
+            {% else %}
+              <form method="post" action="/posted/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <button class="mark-posted-btn" type="submit">📌 Mark as posted</button>
+              </form>
+            {% endif %}
           </div>
         </div>
         {% endfor %}
@@ -117,6 +204,29 @@
 
   <script>
     let polling = null;
+
+    function checkPrice(btn) {
+      const wrap = btn.closest(".price-checker");
+      const input = wrap.querySelector(".pc-input");
+      const result = wrap.querySelector(".pc-result");
+      const breakeven = parseFloat(input.dataset.breakeven);
+      const price = parseFloat(input.value);
+
+      if (isNaN(price)) {
+        result.className = "pc-result";
+        result.textContent = "Enter a price first";
+        return;
+      }
+
+      const diff = (price - breakeven).toFixed(2);
+      if (price >= breakeven) {
+        result.className = "pc-result ok";
+        result.textContent = `✅ Still profitable — $${diff} above break-even`;
+      } else {
+        result.className = "pc-result bad";
+        result.textContent = `❌ Drop this product — $${Math.abs(diff)} below break-even`;
+      }
+    }
 
     function setStatus(status, msg) {
       const badge = document.getElementById("statusBadge");
@@ -151,13 +261,31 @@
 
         if (data.status === "done" || data.status === "error") {
           clearInterval(polling);
+          polling = null;
           document.getElementById("runBtn").disabled = false;
           if (data.status === "done") location.reload();
         }
       });
     }
 
-    setStatus("{{ status }}", "");
+    // Refresh-resistant resume: the scan runs server-side regardless of this
+    // page's JS state, so on every load (including a plain refresh mid-scan)
+    // we re-sync from the server instead of assuming a fresh "idle" page.
+    const initialStatus = "{{ status }}";
+    const initialLogs = {{ initial_logs_json | safe }};
+    setStatus(initialStatus, "{{ error or '' }}");
+    if (initialLogs.length) {
+      const logBox = document.getElementById("log");
+      logBox.style.display = "block";
+      logBox.textContent = initialLogs.join("\n");
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+    if (initialStatus === "running") {
+      document.getElementById("runBtn").disabled = true;
+      if (polling) clearInterval(polling);
+      polling = setInterval(poll, 1500);
+      poll(); // sync immediately instead of waiting for the first tick
+    }
   </script>
 </body>
 </html>

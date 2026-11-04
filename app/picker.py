@@ -11,6 +11,7 @@ keyword filter on top of the relevance/seasonal filters, and a verified
 product_url_for() link per product.
 """
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,32 +28,70 @@ from app.cj_client import (
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SCAN_RESULT_FILE = DATA_DIR / "last_scan.json"
 
-# Mirthovia-relevant categories. target_retail is a realistic fixed market
-# price for that product type - using landed_cost x markup for everything
-# would make every product's margin come out roughly identical regardless of
-# what it actually sells for, which defeats the point of ranking by margin.
+# Mirthovia-relevant categories. Keywords are PLAIN category terms, not
+# "cute X" / "kawaii X" - CJ product titles rarely contain the aesthetic word
+# AND the category word as one contiguous phrase, so prefixing the search
+# term with "cute"/"kawaii" made the relevance filter reject almost
+# everything. The aesthetic is enforced separately by is_cute() below, using
+# CUTENESS_KEYWORDS from .env - that's the only place "cute" should be checked.
+#
+# target_retail is a realistic fixed market price for that product type -
+# using landed_cost x markup for everything would make every product's
+# margin come out roughly identical regardless of what it actually sells
+# for, which defeats the point of ranking by margin.
 CATEGORIES = [
-    {"name": "Hair Accessories", "keywords": ["cute hair clip", "pearl hair claw clip"], "target_retail": 12.99},
-    {"name": "Phone Accessories", "keywords": ["cute phone charm", "kawaii phone case"], "target_retail": 14.99},
-    {"name": "Stationery & Desk", "keywords": ["kawaii stationery", "cute desk organizer"], "target_retail": 9.99},
-    {"name": "Keychains & Charms", "keywords": ["cute keychain", "plush bag charm"], "target_retail": 8.99},
-    {"name": "Jewelry", "keywords": ["cute ring set", "kawaii earrings"], "target_retail": 11.99},
+    {"name": "Hair Accessories", "keywords": ["hair clip", "hair tie", "hair band", "scrunchie"], "target_retail": 12.99},
+    {"name": "Phone Accessories", "keywords": ["phone charm", "phone case"], "target_retail": 14.99},
+    {"name": "Stationery & Desk", "keywords": ["stationery", "desk organizer"], "target_retail": 9.99},
+    {"name": "Keychains & Charms", "keywords": ["keychain", "bag charm"], "target_retail": 8.99},
+    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "target_retail": 11.99},
+    {"name": "Dresses", "keywords": ["dress"], "target_retail": 29.99},
+    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "target_retail": 19.99},
+    {"name": "Skirts", "keywords": ["skirt"], "target_retail": 22.99},
 ]
 
 TOP_PER_CATEGORY = 6
 TOP_OVERALL = 12
-FALLBACK_MARKUP = 3.5
+FALLBACK_MARKUP = 2.2  # conservative on purpose - see retail_source note below
+
+
+def _has_word(text: str, word: str) -> bool:
+    # Whole-word match, not plain substring - a naive `word in text` check
+    # would let "ring" match inside "earring", "top" match inside "laptop",
+    # "cat" match inside "category", "band" match inside "husband", etc.
+    # Allows an optional trailing "s"/"es" so plain plurals ("dress"/"dresses",
+    # "star"/"stars") still match without needing both forms listed.
+    return re.search(r"(?<!\w)" + re.escape(word) + r"(?:es|s)?(?!\w)", text) is not None
 
 
 def is_relevant(name: str, keyword: str) -> bool:
-    return keyword.strip().lower() in (name or "").lower()
+    # Require every word of the keyword to appear somewhere in the name (not
+    # necessarily contiguous/in order) - a strict exact-phrase match was
+    # rejecting nearly all real CJ titles, which rarely repeat a multi-word
+    # search term verbatim (e.g. "Pearl Flower Hair Clip" doesn't contain the
+    # literal substring "hair claw clip" even though it's clearly relevant).
+    lname = (name or "").lower()
+    return all(_has_word(lname, word) for word in keyword.strip().lower().split())
 
 
 def is_cute(name: str, cuteness_keywords: list[str]) -> bool:
     if not cuteness_keywords:
         return True
     lname = (name or "").lower()
-    return any(marker in lname for marker in cuteness_keywords)
+    return any(_has_word(lname, marker) for marker in cuteness_keywords)
+
+
+# Clothing titles are noisier than small accessories - a single cuteness
+# keyword match (e.g. "pink", "flower") isn't a reliable enough signal on its
+# own, so these words hard-disqualify a product regardless of what else
+# matched (e.g. "Sexy Slim Oblique Shoulder Skirt" matched a cuteness keyword
+# but is clearly off-brand for Mirthovia).
+OFF_BRAND_KEYWORDS = ["sexy", "lingerie", "bodycon", "see-through", "sheer", "fetish", "erotic"]
+
+
+def is_off_brand(name: str) -> bool:
+    lname = (name or "").lower()
+    return any(_has_word(lname, word) for word in OFF_BRAND_KEYWORDS)
 
 
 def _cheapest_shipping(client: CJClient, vid: str, destination_country: str):
@@ -123,6 +162,7 @@ def _score_product(
         "name": name,
         "category": category_name,
         "image": p.get("bigImage"),
+        "has_video": bool(p.get("isVideo")),
         "product_url": product_url_for(pid, name),
         "sku": variant.get("variantSku") or p.get("sku"),
         "cost": round(cost, 2),
@@ -135,6 +175,10 @@ def _score_product(
             round(min(v["shipping_cost"] for v in per_country.values()), 2),
             round(max(v["shipping_cost"] for v in per_country.values()), 2),
         ),
+        # Minimum price that still breaks even, using worst-case shipping so
+        # it holds everywhere you sell - if a real market price you find is
+        # below this, drop the product, there's no way to sell it profitably.
+        "breakeven": round(cost + worst_shipping, 2),
         "listed_num": int(p.get("listedNum") or 0),
     }
 
@@ -166,10 +210,11 @@ def run_scan(
             filtered = [
                 p for p in raw
                 if not is_seasonal(p.get("nameEn"))
+                and not is_off_brand(p.get("nameEn"))
                 and is_relevant(p.get("nameEn"), kw)
                 and is_cute(p.get("nameEn"), cuteness_keywords)
             ]
-            log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+relevance+cuteness filters")
+            log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+off-brand+relevance+cuteness filters")
             filtered.sort(key=lambda p: int(p.get("listedNum") or 0), reverse=True)
 
             added = 0

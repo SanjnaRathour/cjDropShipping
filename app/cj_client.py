@@ -123,7 +123,16 @@ class CJClient:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 resp = requests.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
-                return resp.json()
+                try:
+                    return resp.json()
+                except ValueError:
+                    # CJ occasionally returns an empty/non-JSON body (rate
+                    # limit, transient 5xx, etc.) - retry like a network
+                    # error instead of crashing the whole caller with a raw
+                    # JSONDecodeError.
+                    last_err = f"non-JSON response (HTTP {resp.status_code}): {resp.text[:200]!r}"
+                    time.sleep(2 * attempt)
+                    continue
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 last_err = e
                 time.sleep(2 * attempt)
@@ -161,7 +170,7 @@ class CJClient:
         params = {"keyWord": keyword, "page": page, "size": size, "orderBy": 1, "sort": "desc"}
         data = self._request("GET", "/product/listV2", params=params)
         products = []
-        for block in data.get("data", {}).get("content", []):
+        for block in (data.get("data") or {}).get("content", []):
             products.extend(block.get("productList", []))
         return products
 
@@ -171,6 +180,16 @@ class CJClient:
         variantKey, variantSellPrice, variantNameEn."""
         data = self._request("GET", "/product/variant/query", params={"pid": pid})
         return data.get("data") or []
+
+    def get_product_detail(self, pid: str) -> dict:
+        """GET /product/query?pid=... - per CJ's docs, returns the full image
+        gallery (productImageSet, array) and video (productVideo) alongside
+        the fields already available from search. Not empirically confirmed
+        against a live account the way search/variant/freight are (see
+        picker.py's module docstring) - if fields differ for your account,
+        this returns whatever CJ actually sent so the caller can adapt."""
+        data = self._request("GET", "/product/query", params={"pid": pid})
+        return data.get("data") or {}
 
     def calculate_freight(self, start_country_code: str, end_country_code: str, products: list[dict]) -> list[dict]:
         """products: [{"vid": "<variant id>", "quantity": 1}]
@@ -184,63 +203,3 @@ class CJClient:
         data = self._request("POST", "/logistic/freightCalculate", json=body)
         return data.get("data", []) or []
 
-    def create_order(
-        self,
-        order_number: str,
-        shipping_country_code: str,
-        shipping_country: str,
-        shipping_province: str,
-        shipping_city: str,
-        shipping_customer_name: str,
-        shipping_address: str,
-        logistic_name: str,
-        products: list[dict],
-        from_country_code: str = "CN",
-        shipping_zip: str | None = None,
-        shipping_phone: str | None = None,
-    ) -> dict:
-        """POST /shopping/order/createOrderV2 (per CJ's docs; not yet
-        exercised against a live account - if your account's response shape
-        differs, the raised CJAPIError will show CJ's real message).
-
-        logistic_name: must match an option CJ's freightCalculate just
-        returned for this exact product+destination - call calculate_freight()
-        right before this and reuse its cheapest option's name."""
-        body = {
-            "orderNumber": order_number,
-            "shippingCountryCode": shipping_country_code,
-            "shippingCountry": shipping_country,
-            "shippingProvince": shipping_province,
-            "shippingCity": shipping_city,
-            "shippingCustomerName": shipping_customer_name,
-            "shippingAddress": shipping_address,
-            "logisticName": logistic_name,
-            "fromCountryCode": from_country_code,
-            "products": products,
-        }
-        if shipping_zip:
-            body["shippingZip"] = shipping_zip
-        if shipping_phone:
-            body["shippingPhone"] = shipping_phone
-        data = self._request("POST", "/shopping/order/createOrderV2", json=body)
-        return data.get("data", {})
-
-    def list_orders(self, page_num: int = 1, page_size: int = 20, status: str | None = None) -> dict:
-        params = {"pageNum": page_num, "pageSize": page_size}
-        if status:
-            params["status"] = status
-        data = self._request("GET", "/shopping/order/list", params=params)
-        return data.get("data", {}) or {}
-
-    def get_order_detail(self, order_id: str) -> dict:
-        data = self._request("GET", "/shopping/order/getOrderDetail", params={"orderId": order_id})
-        return data.get("data", {}) or {}
-
-    def confirm_order(self, order_id: str) -> dict:
-        data = self._request("PATCH", "/shopping/order/confirmOrder", json={"orderId": order_id})
-        return data.get("data", {})
-
-    def cancel_order(self, order_id: str) -> dict:
-        """Only succeeds while the order is still CREATED or IN_CART."""
-        data = self._request("DELETE", "/shopping/order/deleteOrder", params={"orderId": order_id})
-        return data.get("data", {})
