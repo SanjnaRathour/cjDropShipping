@@ -1,17 +1,27 @@
+import io
 import json
 import os
+import re
 import threading
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from app.cj_client import CJClient, CJAPIError
-from app.gemini_client import generate_instagram_caption, GeminiAPIError
-from app.picker import run_scan, load_last_scan
+from app import db
+from app.cj_client import CJClient, CJAPIError, summarize_variants
+from app.db import DBError
+from app.gemini_client import generate_instagram_content, estimate_market_price, GeminiAPIError
+from app.image_export import export_image, UnknownCanvasError
+from app.instagram_specs import check_image_for_instagram, check_video_for_instagram
+from app.pinterest_specs import check_image_for_pinterest
+from app.picker import run_scan, load_last_scan, _score_product
+
+PLATFORMS = ("instagram", "pinterest")
 
 load_dotenv()
 
@@ -48,20 +58,62 @@ def _with_inr(product: dict, rate: float) -> dict:
     return p
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-POSTED_FILE = DATA_DIR / "posted_products.json"
+MAX_LOG_ENTRIES = 200
+
+
+def _load_fetch_log() -> list:
+    try:
+        return db.load_fetch_log()
+    except DBError:
+        return []
+
+
+def _log_fetch_attempt(link: str, pid: str | None, status: str, name: str | None = None, error: str | None = None):
+    """One row per distinct product/link, most-recent-first - a retry
+    updates its existing row in place (and moves it to the top) instead of
+    piling up duplicate rows for the same product every time you retry it."""
+    key = pid or link
+    db.log_fetch_attempt(key, {
+        "link": link,
+        "pid": pid,
+        "status": status,
+        "name": name,
+        "error": error,
+        "fetched_at": datetime.now().isoformat(),
+    })
+
+
+def _extract_pid(link: str) -> str | None:
+    """Accepts a raw CJ pid or a product page URL like
+    .../product/some-slug-p-1779495048112394240.html - pulls the numeric pid
+    out of either."""
+    link = link.strip()
+    if link.isdigit():
+        return link
+    m = re.search(r"-p-(\d{10,})\.html", link)
+    if m:
+        return m.group(1)
+    m = re.search(r"(\d{10,})", link)
+    return m.group(1) if m else None
 
 
 def _load_posted() -> dict:
-    if POSTED_FILE.exists():
-        return json.loads(POSTED_FILE.read_text())
-    return {}
+    try:
+        posted = db.load_posted()
+    except DBError:
+        return {}
+    # Older entries only had a single "posted_at" (back when there was one
+    # platform) - treat that as "posted to Instagram" rather than losing it.
+    for entry in posted.values():
+        if "platforms" not in entry:
+            entry["platforms"] = {"instagram": entry.get("posted_at"), "pinterest": None}
+    return posted
 
 
-def _mark_posted(pid: str, name: str):
-    DATA_DIR.mkdir(exist_ok=True)
-    posted = _load_posted()
-    posted[str(pid)] = {"name": name, "posted_at": datetime.now().isoformat()}
-    POSTED_FILE.write_text(json.dumps(posted, indent=2))
+def _mark_posted(pid: str, name: str, platform: str):
+    if platform not in PLATFORMS:
+        raise ValueError(f"Unknown platform: {platform}")
+    db.mark_posted(pid, name, platform)
 
 
 _client: CJClient | None = None
@@ -130,6 +182,59 @@ def scan_status():
         }
 
 
+@app.post("/add-link")
+def add_link(link: str = Form(...), return_to: str = Form("/")):
+    """Fetches one product directly from a pasted CJ link or raw pid, scores
+    it with real cost/shipping data (same scoring as a scan), and stores it
+    so /product/{pid} works for it - for grabbing photos/video to post
+    without waiting on or depending on a full category scan. Every attempt
+    (success or failure) is logged to /fetched so a failed fetch isn't just
+    a one-off error message you lose - it's a row you can retry."""
+    pid = _extract_pid(link)
+    if not pid:
+        _log_fetch_attempt(link, None, "error", error="Couldn't find a product ID in that link")
+        return RedirectResponse(f"{return_to}?add_error=Couldn%27t+find+a+product+ID+in+that+link", status_code=303)
+
+    existing = _find_product(pid)
+    if existing:
+        _log_fetch_attempt(link, pid, "ok", name=existing.get("name"))
+        return RedirectResponse(f"/product/{pid}", status_code=303)
+
+    try:
+        client = get_client()
+        detail = _cached_product_data(pid)["detail"]
+        name = detail.get("productNameEn") or detail.get("productName") or pid
+        raw = {
+            "id": pid,
+            "nameEn": name,
+            "bigImage": detail.get("bigImage"),
+            "isVideo": bool(detail.get("productVideo")),
+            "sellPrice": detail.get("sellPrice"),
+            "listedNum": detail.get("listedNum"),
+        }
+        scored = _score_product(client, raw, "Manually Added", 0, DESTINATION_COUNTRIES, MARKUP_MULTIPLIER, log=print)
+    except (CJAPIError, DBError) as e:
+        _log_fetch_attempt(link, pid, "error", error=str(e))
+        return RedirectResponse(f"{return_to}?add_error={e}", status_code=303)
+
+    if not scored:
+        error = "Couldn't get a usable variant or shipping quote for that product"
+        _log_fetch_attempt(link, pid, "error", name=name, error=error)
+        return RedirectResponse(f"{return_to}?add_error={error.replace(' ', '+')}", status_code=303)
+
+    db.upsert_product(pid, scored, source="manual")
+    _log_fetch_attempt(link, pid, "ok", name=scored.get("name"))
+    return RedirectResponse(f"/product/{pid}", status_code=303)
+
+
+@app.get("/fetched", response_class=HTMLResponse)
+def fetched_log(request: Request):
+    return templates.TemplateResponse(
+        "fetched.html",
+        {"request": request, "entries": _load_fetch_log()},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     with SCAN_LOCK:
@@ -138,41 +243,62 @@ def dashboard(request: Request):
         error = SCAN_STATE["error"]
         logs = list(SCAN_STATE["logs"][-200:])
 
-    today_pick = []
+    all_products = []
+    categories_present = []
+    generated_at = None
     if data:
         posted = _load_posted()
 
         def _enrich(p):
             p = _with_inr(p, USD_TO_INR)
-            p["posted_at"] = posted.get(str(p["pid"]), {}).get("posted_at")
+            platforms = posted.get(str(p["pid"]), {}).get("platforms", {})
+            p["posted_instagram"] = platforms.get("instagram")
+            p["posted_pinterest"] = platforms.get("pinterest")
             return p
 
-        data = dict(data)
-        data["top_overall"] = [_enrich(p) for p in data.get("top_overall", [])]
-        data["categories"] = [
-            {"name": c["name"], "products": [_enrich(p) for p in c["products"]]}
-            for c in data.get("categories", [])
-        ]
-        today_pick = [p for p in data["top_overall"] if not p["posted_at"]][:5]
+        generated_at = data.get("generated_at")
+
+        # One deduplicated list instead of "top overall" + the same items
+        # repeated again under their category section - categories become a
+        # client-side filter (badges) on this single grid, not separate lists.
+        seen_pids = set()
+        for p in data.get("top_overall", []):
+            seen_pids.add(str(p["pid"]))
+            all_products.append(_enrich(p))
+        for cat in data.get("categories", []):
+            for p in cat["products"]:
+                if str(p["pid"]) in seen_pids:
+                    continue
+                seen_pids.add(str(p["pid"]))
+                all_products.append(_enrich(p))
+
+        categories_present = sorted({p["category"] for p in all_products})
 
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
-            "data": data,
-            "today_pick": today_pick,
+            "generated_at": generated_at,
+            "all_products": all_products,
+            "categories_present": categories_present,
             "status": status,
             "error": error,
             "initial_logs_json": json.dumps(logs),
             "usd_to_inr": USD_TO_INR,
+            "add_error": request.query_params.get("add_error"),
         },
     )
 
 
 @app.post("/posted/{pid}")
-def mark_posted(pid: str, name: str = Form(...)):
-    _mark_posted(pid, name)
-    return RedirectResponse("/", status_code=303)
+def mark_posted(pid: str, name: str = Form(...), platform: str = Form(...), redirect_to: str = Form("/")):
+    try:
+        _mark_posted(pid, name, platform)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except DBError as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.get("/download-image")
@@ -190,6 +316,107 @@ def download_image(url: str, filename: str = "mirthovia-product.jpg"):
     )
 
 
+@app.get("/export-image")
+def export_image_route(url: str, platform: str, canvas: str, filename: str = "mirthovia-export.jpg"):
+    """Actually crops + resizes the source photo to the platform's exact
+    canvas size (not just a pass-through like /download-image) - e.g. a
+    square CJ product photo center-cropped and resized to Pinterest's
+    1000x1500 Standard Pin, ready to post as-is."""
+    import requests as _requests
+
+    r = _requests.get(url, timeout=30)
+    r.raise_for_status()
+    try:
+        out_bytes = export_image(r.content, platform, canvas)
+    except UnknownCanvasError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+DOWNLOAD_VARIANTS = {
+    "original": None,
+    "instagram-square": ("instagram", "square"),
+    "instagram-portrait": ("instagram", "portrait"),
+    "pinterest-standard": ("pinterest", "standard"),
+    "pinterest-square": ("pinterest", "square"),
+}
+
+
+@app.get("/download-all/{pid}")
+def download_all_images(
+    pid: str,
+    variant: str = "original",
+    include_video: bool = False,
+    indices: list[str] = Query(default=[]),
+):
+    """One zip, built from whichever photos were checked on the page (all by
+    default), exported to whichever platform size was picked."""
+    import requests as _requests
+
+    if variant not in DOWNLOAD_VARIANTS:
+        return JSONResponse({"error": f"Unknown variant: {variant}"}, status_code=400)
+    platform_canvas = DOWNLOAD_VARIANTS[variant]
+
+    product = _find_product(pid)
+    name = product["name"] if product else pid
+    fallback_image = product.get("image") if product else None
+    images, video_url, error = _fetch_media(pid, fallback_image)
+
+    if not images:
+        return JSONResponse({"error": error or "No images found for this product."}, status_code=404)
+
+    if indices:
+        wanted = {int(i) for i in indices if i.isdigit()}
+        images = [img for i, img in enumerate(images, start=1) if i in wanted]
+        if not images:
+            return JSONResponse({"error": "No photos selected."}, status_code=400)
+
+    safe_name = _safe_filename(name)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, url in enumerate(images, start=1):
+            try:
+                r = _requests.get(url, timeout=30)
+                r.raise_for_status()
+                content = r.content
+            except Exception:
+                continue
+
+            if platform_canvas:
+                try:
+                    content = export_image(content, *platform_canvas)
+                    ext = ".jpg"
+                except Exception:
+                    continue  # skip a photo that fails to export rather than fail the whole zip
+            else:
+                lower = url.lower()
+                ext = ".png" if lower.endswith(".png") else ".webp" if lower.endswith(".webp") else ".jpg"
+
+            zf.writestr(f"{safe_name}-{i:02d}{ext}", content)
+
+        if include_video and video_url:
+            try:
+                r = _requests.get(video_url, timeout=60)
+                r.raise_for_status()
+                lower = video_url.lower()
+                ext = ".mov" if lower.endswith(".mov") else ".mp4"
+                zf.writestr(f"{safe_name}-video{ext}", r.content)
+            except Exception:
+                pass  # photos in the zip still matter even if the video fetch fails
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-photos.zip"'},
+    )
+
+
 def _first_truthy(*values):
     for v in values:
         if v:
@@ -197,21 +424,92 @@ def _first_truthy(*values):
     return None
 
 
-@app.get("/media/{pid}", response_class=HTMLResponse)
-def product_media(request: Request, pid: str, name: str = "", fallback_image: str = ""):
-    """On-demand full image gallery + video for one product - not fetched
-    during the bulk scan (that would add an extra API call per candidate and
-    slow the whole scan down), only when you actually want everything for a
-    product you're about to post."""
+def _find_product(pid: str) -> dict | None:
+    """The `products` collection is the single canonical, deduplicated store
+    for every product ever captured (scan or manual fetch) - check it first.
+    Only fall back to the in-memory last-scan data if the DB itself is
+    unreachable, so a Mongo outage doesn't take down product pages you'd
+    otherwise still be able to see from this session's scan."""
+    try:
+        found = db.get_product(pid)
+        if found:
+            return found
+    except DBError:
+        pass
+
+    with SCAN_LOCK:
+        data = SCAN_STATE["data"]
+    if data:
+        for p in data.get("top_overall", []):
+            if str(p["pid"]) == str(pid):
+                return p
+        for cat in data.get("categories", []):
+            for p in cat["products"]:
+                if str(p["pid"]) == str(pid):
+                    return p
+    return None
+
+
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9\-_]+", "_", name or "").strip("_")
+    return cleaned[:60] or "product"
+
+
+def _cached_product_data(pid: str) -> dict:
+    """CJ rate-limits each API endpoint to ~1000 calls/day - don't waste them
+    re-fetching a product's detail/variants every time you reopen its page,
+    add it to store, or revisit something already posted. One cache miss per
+    product fetches both detail + variants together; every call after that
+    (forever, unless the DB doc is deleted) reads from Mongo with zero API
+    calls. Product photos/variants essentially never change day to day, so
+    there's no real downside to caching indefinitely."""
+    cached = db.get_product_cache(pid)
+    if cached:
+        return cached
+
+    client = get_client()
+    detail = client.get_product_detail(pid)
+    variants = client.get_variants(pid)
+    cached = {"detail": detail, "variants": variants, "cached_at": datetime.now().isoformat()}
+    db.save_product_cache(pid, cached)
+    return cached
+
+
+def _cached_image_checks(pid: str, images: list[str]) -> list[dict]:
+    """Checking every photo against Instagram's + Pinterest's format specs
+    means downloading each one in full (twice - once per platform) - without
+    caching that happens on EVERY page view, which is why reopening a
+    product with 15+ photos feels like it's re-fetching from scratch every
+    time. Cache the results in the same product_cache doc, keyed to this
+    exact image list; only recompute if the gallery itself changed."""
+    cached = db.get_product_cache(pid) or {}
+
+    if cached.get("image_checks_for") == images and cached.get("image_checks"):
+        return cached["image_checks"]
+
+    checks = [
+        {"url": img, "instagram": check_image_for_instagram(img), "pinterest": check_image_for_pinterest(img)}
+        for img in images
+    ]
+    cached["image_checks"] = checks
+    cached["image_checks_for"] = images
+    db.save_product_cache(pid, cached)
+    return checks
+
+
+def _fetch_media(pid: str, fallback_image: str | None) -> tuple[list[str], str | None, str | None]:
+    """Shared by the detail page and the ZIP download - keeps productImageSet's
+    own order (matches CJ's actual product-page gallery order), only falling
+    back to a single image if the gallery came back empty."""
     error = None
     images = []
     video_url = None
     try:
-        detail = get_client().get_product_detail(pid)
+        detail = _cached_product_data(pid)["detail"]
         images = detail.get("productImageSet") or detail.get("newImgList") or []
-        single = _first_truthy(detail.get("bigImage"), detail.get("img"), detail.get("bigimg"), fallback_image)
-        if single and single not in images:
-            images = [single] + images
+        if not images:
+            single = _first_truthy(detail.get("bigImage"), detail.get("img"), detail.get("bigimg"), fallback_image)
+            images = [single] if single else []
         video_url = _first_truthy(detail.get("productVideo"), detail.get("video"))
         if not video_url:
             video_list = detail.get("videoList") or []
@@ -220,26 +518,97 @@ def product_media(request: Request, pid: str, name: str = "", fallback_image: st
         error = str(e)
         if fallback_image:
             images = [fallback_image]
-
-    return templates.TemplateResponse(
-        "media.html",
-        {"request": request, "name": name, "images": images, "video_url": video_url, "error": error},
-    )
+    return images, video_url, error
 
 
-@app.get("/caption", response_class=HTMLResponse)
-def caption_page(request: Request, name: str, category: str = "", price: float = 0.0):
-    caption = None
-    error = None
-    try:
-        caption = generate_instagram_caption(
-            api_key=GEMINI_API_KEY,
-            product_name=name,
-            category=category or "Cute finds",
-            retail_price=price,
+@app.get("/product/{pid}", response_class=HTMLResponse)
+def product_detail(request: Request, pid: str):
+    """The single consolidated 'everything for this one product' page:
+    full image gallery + video (with Instagram format checks on each),
+    Gemini-written description/caption/5 hashtags/video script, pricing
+    stats, the price checker, and mark-as-posted - replacing the old
+    scattered /media + /caption pages."""
+    product = _find_product(pid)
+    if not product:
+        return templates.TemplateResponse(
+            "product_detail.html",
+            {"request": request, "error": "Product not found in the last scan - it may have expired from cache. Run a new scan.", "product": None},
         )
-    except (GeminiAPIError, ValueError) as e:
-        error = str(e)
+
+    product = _with_inr(product, USD_TO_INR)
+    posted = _load_posted()
+    platforms = posted.get(str(product["pid"]), {}).get("platforms", {})
+    product["posted_instagram"] = platforms.get("instagram")
+    product["posted_pinterest"] = platforms.get("pinterest")
+
+    images, video_url, media_error = _fetch_media(pid, product.get("image"))
+    image_checks = _cached_image_checks(pid, images)
+    video_check = check_video_for_instagram(video_url) if video_url else None
+    best_image_index = next((i for i, c in enumerate(image_checks) if c["instagram"]["verdict"] == "good"), None)
+
+    variants_error = None
+    variants = []
+    try:
+        raw_variants = _cached_product_data(pid)["variants"]
+        variants = summarize_variants(raw_variants)
+        for v in variants:
+            v["cost_inr"] = round(v["cost"] * USD_TO_INR)
+    except CJAPIError as e:
+        variants_error = str(e)
+
     return templates.TemplateResponse(
-        "caption.html", {"request": request, "name": name, "caption": caption, "error": error}
+        "product_detail.html",
+        {
+            "request": request,
+            "error": None,
+            "product": product,
+            "media_error": media_error,
+            "image_checks": image_checks,
+            "best_image_index": best_image_index,
+            "video_url": video_url,
+            "video_check": video_check,
+            "variants": variants,
+            "variants_error": variants_error,
+        },
     )
+
+
+@app.post("/product/{pid}/generate-content")
+def generate_content(pid: str):
+    """Only called when you click the button - Gemini is NOT hit just from
+    viewing a product page, so browsing/pricing never depends on it being up."""
+    product = _find_product(pid)
+    if not product:
+        return JSONResponse({"error": "Product not found."}, status_code=404)
+    try:
+        content = generate_instagram_content(
+            api_key=GEMINI_API_KEY,
+            product_name=product["name"],
+            category=product["category"],
+            retail_price=product["retail"],
+        )
+        return content
+    except (GeminiAPIError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/product/{pid}/estimate-price")
+def estimate_price(pid: str):
+    """Free, no-billing Gemini price estimate - from training knowledge, NOT
+    live search (that's billing-gated). Labeled clearly in the UI as an
+    estimate to verify, not confirmed market research."""
+    product = _find_product(pid)
+    if not product:
+        return JSONResponse({"error": "Product not found."}, status_code=404)
+    try:
+        result = estimate_market_price(
+            api_key=GEMINI_API_KEY,
+            product_name=product["name"],
+            category=product["category"],
+            cost=product["cost"],
+        )
+        return result
+    except (GeminiAPIError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+

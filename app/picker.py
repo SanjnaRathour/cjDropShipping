@@ -10,12 +10,11 @@ freight calls, extended with: multi-country worst-case margin, a cuteness
 keyword filter on top of the relevance/seasonal filters, and a verified
 product_url_for() link per product.
 """
-import json
 import re
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
+from app import db
 from app.cj_client import (
     CJClient,
     CJAPIError,
@@ -24,9 +23,7 @@ from app.cj_client import (
     product_url_for,
     to_float,
 )
-
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-SCAN_RESULT_FILE = DATA_DIR / "last_scan.json"
+from app.db import DBError
 
 # Mirthovia-relevant categories. Keywords are PLAIN category terms, not
 # "cute X" / "kawaii X" - CJ product titles rarely contain the aesthetic word
@@ -44,15 +41,59 @@ CATEGORIES = [
     {"name": "Phone Accessories", "keywords": ["phone charm", "phone case"], "target_retail": 14.99},
     {"name": "Stationery & Desk", "keywords": ["stationery", "desk organizer"], "target_retail": 9.99},
     {"name": "Keychains & Charms", "keywords": ["keychain", "bag charm"], "target_retail": 8.99},
-    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "target_retail": 11.99},
-    {"name": "Dresses", "keywords": ["dress"], "target_retail": 29.99},
-    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "target_retail": 19.99},
-    {"name": "Skirts", "keywords": ["skirt"], "target_retail": 22.99},
+    # Clothing/jewelry run far more sellers-per-listing industry-wide on CJ
+    # than small accessories do (confirmed live: 0/100 "dress"/"bracelet"/
+    # "necklace" results pass the default 300 cutoff) - a higher threshold
+    # here isn't "letting in more competition," it's the actual realistic
+    # floor for these categories.
+    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "target_retail": 11.99, "saturation_threshold": 1500},
+    {"name": "Dresses", "keywords": ["dress"], "target_retail": 29.99, "saturation_threshold": 1500},
+    # Clothing titles almost never contain an explicit "cute/kawaii/pastel"
+    # word even when the item clearly is (confirmed live: only 1/100
+    # "blouse" results passed the cuteness filter) - style here is visual,
+    # not a title keyword, so this category skips that check.
+    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "target_retail": 19.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Skirts", "keywords": ["skirt"], "target_retail": 22.99, "saturation_threshold": 1500},
+    # CJ's search for a compound phrase like "christmas hair clip" mostly
+    # ignores "christmas" and just returns generic hair clips (confirmed
+    # live: 0/100 titles even contained the word) - search broad festive
+    # terms instead and require the title separately mention an on-brand
+    # accessory type, so results are both genuinely Christmas AND on-brand
+    # (not the random holiday home-decor CJ's search otherwise surfaces).
+    {
+        "name": "Christmas & Festive",
+        "keywords": ["christmas", "santa", "snowman", "snowflake"],
+        "target_retail": 11.99,
+        "allow_seasonal": True,
+        "must_contain_any": ["hair clip", "hairpin", "earrings", "necklace", "bracelet", "ring", "keychain", "phone case", "charm"],
+    },
+    {"name": "Bags & Purses", "keywords": ["mini bag", "crossbody bag"], "target_retail": 15.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Sunglasses", "keywords": ["sunglasses"], "target_retail": 12.99, "saturation_threshold": 1500},
+    {"name": "Socks & Legwear", "keywords": ["socks"], "target_retail": 9.99, "saturation_threshold": 1500},
 ]
 
-TOP_PER_CATEGORY = 6
-TOP_OVERALL = 12
+TOP_PER_CATEGORY = 10
+TOP_OVERALL = 30
 FALLBACK_MARKUP = 2.2  # conservative on purpose - see retail_source note below
+
+# listedNum = how many other sellers already carry this exact product on CJ.
+# A real test found a product listed by 7,673 sellers - that's not "proven
+# demand," it's "impossible to differentiate from." Anything past
+# SATURATED_THRESHOLD gets excluded before we even spend a scoring API call
+# on it, and the remaining competition level is shown on every product so
+# you can judge it yourself rather than finding out after the fact.
+SATURATED_THRESHOLD = 300
+
+
+def competition_label(listed_num: int) -> str:
+    if listed_num < 15:
+        return "Fresh"
+    if listed_num < 60:
+        return "Growing"
+    if listed_num < SATURATED_THRESHOLD:
+        return "Established"
+    return "Saturated"
 
 
 def _has_word(text: str, word: str) -> bool:
@@ -137,8 +178,10 @@ def _score_product(
         log(f"    [skip] no shipping quote for any destination: {name[:60]}")
         return None
 
-    # price against a realistic fixed market price for the category; only
-    # fall back to a flat markup if the landed cost is already close to/over it
+    # WED2C bills shipping to the buyer separately by default (confirmed:
+    # its own "Estimated Earning" = price - cost, shipping not subtracted) -
+    # so shipping is not a seller cost and must not reduce margin/breakeven.
+    # It only decides which market-price floor to use below.
     worst_shipping = max(v["shipping_cost"] for v in per_country.values())
     landed_worst = round(cost + worst_shipping, 2)
     if target_retail > landed_worst:
@@ -147,9 +190,13 @@ def _score_product(
     else:
         retail = round(landed_worst * markup, 2)
         retail_source = f"{markup}x markup"
+        max_retail = round(cost / 0.4, 2)  # cap at 60% margin - only the
+        if retail > max_retail:            # markup fallback can run away
+            retail = max_retail             # like this; a category target
+            retail_source += ", capped at 60% margin"  # price is already realistic
 
     for country, v in per_country.items():
-        margin = round(retail - cost - v["shipping_cost"], 2)
+        margin = round(retail - cost, 2)
         v["margin"] = margin
         v["margin_pct"] = round((margin / retail) * 100, 1) if retail else 0.0
 
@@ -175,11 +222,11 @@ def _score_product(
             round(min(v["shipping_cost"] for v in per_country.values()), 2),
             round(max(v["shipping_cost"] for v in per_country.values()), 2),
         ),
-        # Minimum price that still breaks even, using worst-case shipping so
-        # it holds everywhere you sell - if a real market price you find is
-        # below this, drop the product, there's no way to sell it profitably.
-        "breakeven": round(cost + worst_shipping, 2),
+        # Minimum price that still breaks even - just cost, since shipping
+        # is billed to the buyer separately, not absorbed by you.
+        "breakeven": round(cost, 2),
         "listed_num": int(p.get("listedNum") or 0),
+        "competition": competition_label(int(p.get("listedNum") or 0)),
     }
 
 
@@ -193,6 +240,11 @@ def run_scan(
     categories_out = []
     all_products = []
 
+    try:
+        known_pids = {str(p["pid"]) for p in db.get_all_products()}
+    except DBError:
+        known_pids = set()  # can't tell new from seen - fall back to old sort only
+
     for cat in CATEGORIES:
         log(f"=== {cat['name']} ===")
         seen_ids = set()
@@ -202,20 +254,32 @@ def run_scan(
         for kw in cat["keywords"]:
             log(f"  searching '{kw}'...")
             try:
-                raw = client.search_products(kw, size=30)
+                raw = client.search_products(kw, size=100)  # CJ's max page size per the docs
             except CJAPIError as e:
                 log(f"  [warn] search failed for '{kw}': {e}")
                 continue
 
+            cat_threshold = cat.get("saturation_threshold", SATURATED_THRESHOLD)
+            must_contain_any = cat.get("must_contain_any")
             filtered = [
                 p for p in raw
-                if not is_seasonal(p.get("nameEn"))
+                if (cat.get("allow_seasonal") or not is_seasonal(p.get("nameEn")))
                 and not is_off_brand(p.get("nameEn"))
                 and is_relevant(p.get("nameEn"), kw)
-                and is_cute(p.get("nameEn"), cuteness_keywords)
+                and (cat.get("require_cute", True) is False or is_cute(p.get("nameEn"), cuteness_keywords))
+                and int(p.get("listedNum") or 0) < cat_threshold
+                and (not must_contain_any or any(_has_word((p.get("nameEn") or "").lower(), w) for w in must_contain_any))
             ]
-            log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+off-brand+relevance+cuteness filters")
-            filtered.sort(key=lambda p: int(p.get("listedNum") or 0), reverse=True)
+            log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+off-brand+relevance+cuteness+competition filters")
+            # Prefer products not already captured in a past scan/fetch, so
+            # a daily re-scan surfaces new finds instead of the same top
+            # results every time; within that, same demand-sweet-spot sort
+            # as before (not brand new/unproven, not oversaturated).
+            sweet_spot = cat_threshold / 2
+            filtered.sort(key=lambda p: (
+                str(p.get("id")) in known_pids,
+                abs(int(p.get("listedNum") or 0) - sweet_spot),
+            ))
 
             added = 0
             for p in filtered:
@@ -239,24 +303,43 @@ def run_scan(
                     f"worst-case margin={scored['worst_case_margin_pct']}%"
                 )
 
-        enriched.sort(key=lambda r: (r["worst_case_margin_pct"], r["listed_num"]), reverse=True)
+        enriched.sort(key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))
         top = enriched[:TOP_PER_CATEGORY]
         categories_out.append({"name": cat["name"], "products": top})
         all_products.extend(top)
 
-    all_products.sort(key=lambda r: (r["worst_case_margin_pct"], r["listed_num"]), reverse=True)
+    all_products.sort(key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))
+
+    if not all_products:
+        # Zero products across every category almost always means CJ's
+        # search endpoint itself is rate-limited/down for now (confirmed by
+        # testing: other endpoints like product detail still worked fine
+        # while search returned 0 for every keyword) - NOT a real "nothing
+        # found" result. Raise instead of silently overwriting good cached
+        # results from a previous successful scan with an empty one.
+        raise CJAPIError(
+            "Scan found 0 products in every category - this almost always means CJ's "
+            "search endpoint is rate-limited right now (check if other calls like "
+            "product detail still work), not that nothing matched. Previous scan "
+            "results were kept, not overwritten. Try again later."
+        )
 
     result = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "categories": categories_out,
         "top_overall": all_products[:TOP_OVERALL],
     }
-    DATA_DIR.mkdir(exist_ok=True)
-    SCAN_RESULT_FILE.write_text(json.dumps(result, indent=2))
+    db.save_last_scan(result)
+    for p in all_products:
+        db.upsert_product(p["pid"], p, source="scan")
     return result
 
 
 def load_last_scan() -> dict | None:
-    if SCAN_RESULT_FILE.exists():
-        return json.loads(SCAN_RESULT_FILE.read_text())
-    return None
+    try:
+        return db.get_last_scan()
+    except DBError:
+        # Mongo isn't configured/reachable yet - this is called at import
+        # time (main.py's SCAN_STATE init), so it must not crash the whole
+        # app before the user's even had a chance to set MONGODB_URI.
+        return None

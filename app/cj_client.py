@@ -77,6 +77,24 @@ def pick_representative_variant(variants: list[dict]) -> dict | None:
     return min(pool, key=lambda v: abs(to_float(v.get("variantSellPrice"), 1e9) - median))
 
 
+def summarize_variants(variants: list[dict]) -> list[dict]:
+    """Full variant list (SKU, option name, price, bundle flag) for display -
+    every color/size option, not just the single representative one used
+    for margin ranking."""
+    out = [
+        {
+            "sku": v.get("variantSku") or "",
+            "option": v.get("variantKey") or "default",
+            "cost": round(to_float(v.get("variantSellPrice")), 2),
+            "is_bundle": is_bundle_variant(v),
+            "image": v.get("variantImage"),
+        }
+        for v in variants
+    ]
+    out.sort(key=lambda v: (v["is_bundle"], v["cost"]))
+    return out
+
+
 def slugify(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
     return s or "product"
@@ -153,25 +171,35 @@ class CJClient:
         return {"CJ-Access-Token": self.get_access_token(), "Content-Type": "application/json"}
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
+        # Most endpoints signal success via "result", but at least one
+        # (/shop/getShops) uses "success" instead - confirmed against a real
+        # account, not a guess. Accept either rather than trusting just one.
+        def _ok(d: dict) -> bool:
+            return bool(d.get("result") or d.get("success"))
+
         data = self._http(method, f"{BASE_URL}{path}", headers=self._headers(), **kwargs)
-        if not data.get("result"):
+        if not _ok(data):
             if data.get("code") in (401, 1600000, 1600001):
                 self.get_access_token(force=True)
                 data = self._http(method, f"{BASE_URL}{path}", headers=self._headers(), **kwargs)
-                if data.get("result"):
+                if _ok(data):
                     return data
             raise CJAPIError(f"{method} {path} failed: {data.get('message', data)}")
         return data
 
-    def search_products(self, keyword: str, page: int = 1, size: int = 30) -> list[dict]:
+    def search_products(self, keyword: str, page: int = 1, size: int = 100) -> list[dict]:
         """GET /product/listV2 - confirmed response shape: data.content[].productList[]
         (a list of blocks, each holding a productList array), per fields id,
         nameEn, sellPrice, bigImage, sku, listedNum."""
         params = {"keyWord": keyword, "page": page, "size": size, "orderBy": 1, "sort": "desc"}
         data = self._request("GET", "/product/listV2", params=params)
         products = []
-        for block in (data.get("data") or {}).get("content", []):
-            products.extend(block.get("productList", []))
+        # CJ sometimes sends these keys explicitly set to null (not just
+        # missing) when there are no results for a keyword - a plain
+        # .get(key, default) only falls back on a MISSING key, not an
+        # explicit null, so every level here needs the `or` guard too.
+        for block in (data.get("data") or {}).get("content") or []:
+            products.extend(block.get("productList") or [])
         return products
 
     def get_variants(self, pid: str) -> list[dict]:
@@ -202,4 +230,33 @@ class CJClient:
         }
         data = self._request("POST", "/logistic/freightCalculate", json=body)
         return data.get("data", []) or []
+
+    def save_product_to_shop(
+        self,
+        pid: str,
+        title: str,
+        image: str,
+        shop_id: str,
+        price: float,
+        description: str = "",
+        price_currency: str = "USD",
+    ) -> dict:
+        """POST /store/product/saveProduct - confirmed working against a real
+        WED2C-linked shop (shop type comes back as "api" from getShops): this
+        creates a REAL, LIVE listing on that store immediately, not a draft.
+        `price` is the product price only - per a live test on the real
+        account, WED2C bills shipping to the buyer separately by default
+        (its "Free shipping setting" toggle controls this, not this API)."""
+        body = {
+            "id": pid,
+            "title": title[:500],
+            "image": image,
+            "shopId": shop_id,
+            "description": (description or "")[:5000],
+            "priceMin": f"{price:.2f}",
+            "priceMax": f"{price:.2f}",
+            "priceCurrency": price_currency,
+        }
+        data = self._request("POST", "/store/product/saveProduct", json=body)
+        return {"message": data.get("message"), "data": data.get("data")}
 
