@@ -206,7 +206,7 @@
               Shipping (${{ product.shipping_range[0] }}–${{ product.shipping_range[1] }}) is billed to the buyer separately on WED2C by default — not included in the suggested price above.
             </p>
             <div class="price-checker">
-              <input type="number" step="0.01" placeholder="Real price found ($)" class="pc-input" id="pcInput" data-breakeven="{{ product.breakeven }}">
+              <input type="number" step="0.01" placeholder="Price you're setting on WED2C ($)" class="pc-input" id="pcInput" data-breakeven="{{ product.breakeven }}">
               <button type="button" onclick="checkPrice()">Check</button>
             </div>
             <div class="pc-result" id="pcResult"></div>
@@ -390,13 +390,14 @@
         result.textContent = "Enter a price first";
         return;
       }
-      const diff = (price - breakeven).toFixed(2);
+      const profit = price - breakeven;
+      const marginPct = price > 0 ? (profit / price * 100).toFixed(0) : 0;
       if (price >= breakeven) {
         result.className = "pc-result ok";
-        result.textContent = `✓ Still profitable — $${diff} above break-even`;
+        result.textContent = `✓ Profit: $${profit.toFixed(2)} (${marginPct}% margin) at this price`;
       } else {
         result.className = "pc-result bad";
-        result.textContent = `✗ Drop this product — $${Math.abs(diff)} below break-even`;
+        result.textContent = `✗ Drop this product — $${Math.abs(profit).toFixed(2)} below break-even`;
       }
     }
 

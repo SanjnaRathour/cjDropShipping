@@ -185,7 +185,18 @@ def _score_product(
     # It only decides which market-price floor to use below.
     worst_shipping = max(v["shipping_cost"] for v in per_country.values())
     landed_worst = round(cost + worst_shipping, 2)
-    if target_retail > landed_worst:
+
+    listed_num = int(p.get("listedNum") or 0)
+    competition = competition_label(listed_num)
+    is_saturated = competition == "Saturated"
+
+    # A flat category target price assumes a normal market - once hundreds
+    # of sellers are reselling the exact same CJ listing (confirmed live:
+    # a $0.28-cost item the category target priced at $11.99, when other
+    # sellers already have it at $1.50), that assumption breaks. Fall back
+    # to the cost-based formula instead, same as when there's no category
+    # target at all, so the suggestion scales with THIS item's real cost.
+    if target_retail > landed_worst and not is_saturated:
         retail = round(target_retail, 2)
         retail_source = "category target price"
     else:
@@ -195,6 +206,8 @@ def _score_product(
         if retail > max_retail:            # markup fallback can run away
             retail = max_retail             # like this; a category target
             retail_source += ", capped at 60% margin"  # price is already realistic
+        if is_saturated:
+            retail_source += " (category price skipped - saturated)"
 
     for country, v in per_country.items():
         margin = round(retail - cost, 2)
@@ -203,6 +216,13 @@ def _score_product(
 
     worst = min(per_country.values(), key=lambda v: v["margin_pct"])
     best = max(per_country.values(), key=lambda v: v["margin_pct"])
+
+    if is_saturated:
+        # Still worth surfacing the raw number on the price label itself,
+        # not just the competition badge, since hundreds of other sellers
+        # reselling the exact same listing means even this cost-based
+        # number should be checked against what they're actually charging.
+        retail_source += f" — ⚠ {listed_num} sellers already list this exact item, verify the real price before using"
 
     return {
         "pid": pid,
@@ -226,8 +246,8 @@ def _score_product(
         # Minimum price that still breaks even - just cost, since shipping
         # is billed to the buyer separately, not absorbed by you.
         "breakeven": round(cost, 2),
-        "listed_num": int(p.get("listedNum") or 0),
-        "competition": competition_label(int(p.get("listedNum") or 0)),
+        "listed_num": listed_num,
+        "competition": competition,
     }
 
 
