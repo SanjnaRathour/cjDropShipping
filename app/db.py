@@ -132,8 +132,13 @@ def get_product_cache(pid: str) -> dict | None:
 
 
 def save_product_cache(pid: str, cached: dict):
+    # $set, not replace_one - two concurrent requests for a brand-new pid
+    # (e.g. opened in two tabs) can both read an empty/partial cache and
+    # write back different subsets of fields (detail/variants vs
+    # image_checks); replace_one would let whichever writes last erase the
+    # other's fields, $set merges them instead.
     db = get_db()
-    db.product_cache.replace_one({"_id": str(pid)}, {**cached, "_id": str(pid)}, upsert=True)
+    db.product_cache.update_one({"_id": str(pid)}, {"$set": cached}, upsert=True)
 
 
 # --- last scan result ---------------------------------------------------------

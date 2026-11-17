@@ -523,7 +523,7 @@ def _cached_product_data(pid: str) -> dict:
     calls. Product photos/variants essentially never change day to day, so
     there's no real downside to caching indefinitely."""
     cached = db.get_product_cache(pid)
-    if cached:
+    if cached and "detail" in cached:
         return cached
 
     client = get_client()
