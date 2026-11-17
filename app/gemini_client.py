@@ -89,16 +89,11 @@ def _parse_sections(text: str) -> dict:
     return sections
 
 
-def generate_instagram_content(
-    api_key: str,
-    product_name: str,
-    category: str,
-    retail_price: float,
-    brand_name: str = "Mirthovia",
-    model: str = "gemini-3.8-flash",
-) -> dict:
-    """Returns {"description", "caption", "hashtags", "raw"}."""
-    prompt = (
+def build_instagram_prompt(product_name: str, category: str, retail_price: float, brand_name: str = "Mirthovia") -> str:
+    """Same prompt generate_instagram_content sends to Gemini - exposed on
+    its own so it can be copy-pasted into ChatGPT or any other AI when
+    Gemini itself is down, without needing a second code path."""
+    return (
         f"You're writing Instagram-ready content for a small cute-lifestyle shop called "
         f"\"{brand_name}\" (bright, playful, coral/yellow/mint aesthetic, tagline "
         f"\"your little realm of joy\"). The product: \"{product_name}\" (category: {category}), "
@@ -108,6 +103,18 @@ def generate_instagram_content(
         "CAPTION: 2-3 short, warm, playful Instagram caption sentences (no corporate tone)\n"
         "HASHTAGS: exactly 5 relevant hashtags, space-separated, no numbering"
     )
+
+
+def generate_instagram_content(
+    api_key: str,
+    product_name: str,
+    category: str,
+    retail_price: float,
+    brand_name: str = "Mirthovia",
+    model: str = "gemini-3.8-flash",
+) -> dict:
+    """Returns {"description", "caption", "hashtags", "raw"}."""
+    prompt = build_instagram_prompt(product_name, category, retail_price, brand_name)
     raw = _call_gemini(api_key, prompt, model)
     parsed = _parse_sections(raw)
     parsed["raw"] = raw
@@ -137,3 +144,35 @@ def estimate_market_price(
     )
     raw = _call_gemini(api_key, prompt, model)
     return {"estimate": raw.strip(), "raw": raw}
+
+
+def build_collection_prompt(product_names: list[str], brand_name: str = "Mirthovia") -> str:
+    """Same prompt generate_collection_content sends to Gemini - exposed on
+    its own so it can be copy-pasted into ChatGPT or any other AI when
+    Gemini itself is down."""
+    items = "\n".join(f"- {name}" for name in product_names)
+    return (
+        f"You're writing an Instagram carousel caption for a small cute-lifestyle shop called "
+        f"\"{brand_name}\" (bright, playful aesthetic, tagline \"your little realm of joy\"). "
+        f"This single post features {len(product_names)} products together, swipeable as a carousel:\n{items}\n\n"
+        "Output EXACTLY these two labeled sections, each on its own line(s), nothing else:\n\n"
+        "CAPTION: 2-4 short, warm, playful sentences introducing this set of products together "
+        "(don't describe each one individually - treat it as one cohesive roundup/collection)\n"
+        "HASHTAGS: exactly 6 relevant hashtags, space-separated, no numbering"
+    )
+
+
+def generate_collection_content(
+    api_key: str,
+    product_names: list[str],
+    brand_name: str = "Mirthovia",
+    model: str = "gemini-3.8-flash",
+) -> dict:
+    """One combined caption for posting several products together (e.g. as
+    an Instagram carousel) instead of one caption per product. Returns
+    {"caption", "hashtags", "raw"}."""
+    prompt = build_collection_prompt(product_names, brand_name)
+    raw = _call_gemini(api_key, prompt, model)
+    parsed = _parse_sections(raw)
+    parsed["raw"] = raw
+    return parsed

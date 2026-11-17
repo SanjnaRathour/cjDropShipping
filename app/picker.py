@@ -10,9 +10,11 @@ freight calls, extended with: multi-country worst-case margin, a cuteness
 keyword filter on top of the relevance/seasonal filters, and a verified
 product_url_for() link per product.
 """
+import json
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app import db
 from app.cj_client import (
@@ -75,7 +77,6 @@ CATEGORIES = [
 
 TOP_PER_CATEGORY = 10
 TOP_OVERALL = 30
-FALLBACK_MARKUP = 2.2  # conservative on purpose - see retail_source note below
 
 # listedNum = how many other sellers already carry this exact product on CJ.
 # A real test found a product listed by 7,673 sellers - that's not "proven
@@ -234,16 +235,20 @@ def run_scan(
     client: CJClient,
     cuteness_keywords: list[str],
     destination_countries: list[str],
-    markup: float = FALLBACK_MARKUP,
+    markup: float,
     log=print,
 ) -> dict:
     categories_out = []
     all_products = []
 
+    # Check the database BEFORE spending 20-40 minutes on rate-limited CJ
+    # calls across every category - a scan that can't save its result at
+    # the end is pointless, and that failure needs to surface in seconds,
+    # not after all the real work is already done and thrown away.
     try:
         known_pids = {str(p["pid"]) for p in db.get_all_products()}
-    except DBError:
-        known_pids = set()  # can't tell new from seen - fall back to old sort only
+    except DBError as e:
+        raise DBError(f"Can't reach the database - aborting before wasting API calls: {e}") from e
 
     for cat in CATEGORIES:
         log(f"=== {cat['name']} ===")
@@ -329,10 +334,52 @@ def run_scan(
         "categories": categories_out,
         "top_overall": all_products[:TOP_OVERALL],
     }
-    db.save_last_scan(result)
-    for p in all_products:
-        db.upsert_product(p["pid"], p, source="scan")
+
+    # 20-40 minutes of rate-limited CJ calls just produced this - write it
+    # to disk BEFORE touching Mongo, so a save failure (even a transient
+    # one, like Atlas still propagating a new IP allowlist entry) never
+    # throws away completed work. Retry the real save a couple times
+    # before giving up, since that kind of failure is often transient.
+    backup_file = Path(__file__).resolve().parent.parent / "data" / "last_scan_backup.json"
+    backup_file.parent.mkdir(exist_ok=True)
+    backup_file.write_text(json.dumps(result))
+
+    last_err = None
+    for attempt in range(3):
+        try:
+            db.save_last_scan(result)
+            for p in all_products:
+                db.upsert_product(p["pid"], p, source="scan")
+            break
+        except DBError as e:
+            last_err = e
+            log(f"  [warn] DB save failed (attempt {attempt + 1}/3): {e}")
+            time.sleep(5)
+    else:
+        raise DBError(
+            f"Scan finished but couldn't save to the database after 3 tries: {last_err}. "
+            f"The result was NOT lost - it's saved locally at {backup_file}, retry the save "
+            f"once the database is reachable again instead of re-running the whole scan."
+        )
+
+    backup_file.unlink(missing_ok=True)  # saved for real - the local copy was just insurance
     return result
+
+
+def recover_backup() -> bool:
+    """Pushes data/last_scan_backup.json (written by run_scan when the Mongo
+    save itself failed) into the database, without re-scanning. Returns
+    False if there's no backup waiting."""
+    backup_file = Path(__file__).resolve().parent.parent / "data" / "last_scan_backup.json"
+    if not backup_file.exists():
+        return False
+    result = json.loads(backup_file.read_text())
+    db.save_last_scan(result)
+    for cat in result.get("categories", []):
+        for p in cat["products"]:
+            db.upsert_product(p["pid"], p, source="scan")
+    backup_file.unlink()
+    return True
 
 
 def load_last_scan() -> dict | None:

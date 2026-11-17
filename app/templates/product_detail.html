@@ -217,7 +217,10 @@
           <div class="panel">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <h2 style="margin:0">Instagram content (Gemini)</h2>
-              <button type="button" class="copy-btn" id="genBtn" onclick="generateContent('{{ product.pid }}')">✨ Generate</button>
+              <div style="display:flex;gap:6px">
+                <button type="button" class="copy-btn" id="genBtn" onclick="generateContent('{{ product.pid }}')">✨ Generate</button>
+                <button type="button" class="copy-btn" onclick="copyGenerationPrompt('{{ product.pid }}', this)">📋 Copy prompt for ChatGPT</button>
+              </div>
             </div>
             <div id="genError" class="error-box" style="display:none"></div>
             <div id="genBox" style="display:none">
@@ -311,6 +314,19 @@
         .finally(() => {
           btn.disabled = false;
           btn.textContent = "✨ Generate";
+        });
+    }
+
+    function copyGenerationPrompt(pid, btn) {
+      fetch(`/product/${pid}/generate-content-prompt`, { method: "POST" })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) return;
+          navigator.clipboard.writeText(data.prompt).then(() => {
+            const original = btn.textContent;
+            btn.textContent = "Copied!";
+            setTimeout(() => btn.textContent = original, 1200);
+          });
         });
     }
 

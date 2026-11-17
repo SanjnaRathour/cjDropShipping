@@ -15,7 +15,14 @@ from fastapi.templating import Jinja2Templates
 from app import db
 from app.cj_client import CJClient, CJAPIError, summarize_variants
 from app.db import DBError
-from app.gemini_client import generate_instagram_content, estimate_market_price, GeminiAPIError
+from app.gemini_client import (
+    generate_instagram_content,
+    generate_collection_content,
+    build_instagram_prompt,
+    build_collection_prompt,
+    estimate_market_price,
+    GeminiAPIError,
+)
 from app.image_export import export_image, UnknownCanvasError
 from app.instagram_specs import check_image_for_instagram, check_video_for_instagram
 from app.pinterest_specs import check_image_for_pinterest
@@ -338,6 +345,58 @@ def export_image_route(url: str, platform: str, canvas: str, filename: str = "mi
     )
 
 
+@app.get("/collection-download")
+def collection_download_route(pids: list[str] = Query(...)):
+    """Each selected product's main photo as its own file in one zip - for
+    posting them together as an Instagram carousel (or building your own
+    collage in Canva) without merging them into a single image yourself."""
+    import requests as _requests
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, pid in enumerate(pids, start=1):
+            product = _find_product(pid)
+            if not product or not product.get("image"):
+                continue
+            try:
+                r = _requests.get(product["image"], timeout=30)
+                r.raise_for_status()
+            except Exception:
+                continue
+            ext = ".png" if product["image"].lower().endswith(".png") else ".jpg"
+            zf.writestr(f"{i:02d}-{_safe_filename(product['name'])}{ext}", r.content)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="mirthovia-collection-photos.zip"'},
+    )
+
+
+@app.post("/collection-caption")
+def collection_caption_route(pids: list[str] = Form(...)):
+    """One combined Gemini caption for posting the selected products
+    together (as an Instagram carousel), instead of one caption each."""
+    names = [p["name"] for pid in pids if (p := _find_product(pid))]
+    if not names:
+        return JSONResponse({"error": "None of the selected products were found."}, status_code=404)
+    try:
+        return generate_collection_content(api_key=GEMINI_API_KEY, product_names=names)
+    except (GeminiAPIError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/collection-caption-prompt")
+def collection_caption_prompt_route(pids: list[str] = Form(...)):
+    """Same prompt as /collection-caption, without calling Gemini at all -
+    for pasting into ChatGPT or any other AI when Gemini itself is down."""
+    names = [p["name"] for pid in pids if (p := _find_product(pid))]
+    if not names:
+        return JSONResponse({"error": "None of the selected products were found."}, status_code=404)
+    return {"prompt": build_collection_prompt(names)}
+
+
 DOWNLOAD_VARIANTS = {
     "original": None,
     "instagram-square": ("instagram", "square"),
@@ -590,6 +649,17 @@ def generate_content(pid: str):
         return content
     except (GeminiAPIError, ValueError) as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/product/{pid}/generate-content-prompt")
+def generate_content_prompt(pid: str):
+    """Same prompt as /generate-content, without calling Gemini at all -
+    for pasting into ChatGPT or any other AI when Gemini itself is down."""
+    product = _find_product(pid)
+    if not product:
+        return JSONResponse({"error": "Product not found."}, status_code=404)
+    prompt = build_instagram_prompt(product["name"], product["category"], product["retail"])
+    return {"prompt": prompt}
 
 
 @app.post("/product/{pid}/estimate-price")
