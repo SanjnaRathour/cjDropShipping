@@ -106,7 +106,7 @@
       </div>
 
       {% macro product_card(p) %}
-      <div class="card" data-category="{{ p.category }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}">
+      <div class="card" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}">
         <input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)">
         <a href="/product/{{ p.pid }}" style="color:inherit;text-decoration:none">
           <div class="card-img-wrap">
@@ -138,6 +138,13 @@
         <button class="filter-btn" data-value="yes" onclick="setStatusFilter('yes', this)">✓ Posted</button>
       </div>
 
+      <p class="filter-label">Season</p>
+      <div class="filter-bar" id="seasonFilterBar">
+        <button class="filter-btn active" data-value="all" onclick="setSeasonFilter('all', this)">All</button>
+        <button class="filter-btn" data-value="winter" onclick="setSeasonFilter('winter', this)">❄️ Winter</button>
+        <button class="filter-btn" data-value="summer" onclick="setSeasonFilter('summer', this)">☀️ Summer</button>
+      </div>
+
       <p class="filter-label">Category</p>
       <div class="filter-bar" id="categoryFilterBar">
         <button class="filter-btn active" data-value="all" onclick="setCategoryFilter('all', this)">All</button>
@@ -167,6 +174,7 @@
 
     let statusFilter = "all";
     let categoryFilter = "all";
+    let seasonFilter = "all";
 
     function setStatusFilter(value, btn) {
       statusFilter = value;
@@ -182,12 +190,20 @@
       applyFilters();
     }
 
+    function setSeasonFilter(value, btn) {
+      seasonFilter = value;
+      document.querySelectorAll("#seasonFilterBar .filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      applyFilters();
+    }
+
     function applyFilters() {
       let visibleCount = 0;
       document.querySelectorAll("#productGrid .card").forEach(card => {
         const statusOk = statusFilter === "all" || card.dataset.posted === statusFilter;
         const categoryOk = categoryFilter === "all" || card.dataset.category === categoryFilter;
-        const show = statusOk && categoryOk;
+        const seasonOk = seasonFilter === "all" || card.dataset.season === seasonFilter;
+        const show = statusOk && categoryOk && seasonOk;
         card.style.display = show ? "" : "none";
         if (show) visibleCount++;
       });

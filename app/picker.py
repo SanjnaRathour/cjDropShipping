@@ -78,6 +78,21 @@ CATEGORIES = [
 TOP_PER_CATEGORY = 10
 TOP_OVERALL = 30
 
+# Category -> season, for the dashboard's season filter - not a separate
+# scan, just a lookup by the category name already stored on every product.
+CATEGORY_SEASON = {
+    "Sweaters & Cardigans": "winter",
+    "Socks & Legwear": "winter",
+    "Christmas & Festive": "winter",
+    "Dresses": "summer",
+    "Skirts": "summer",
+    "Sunglasses": "summer",
+}
+
+
+def season_for_category(category: str) -> str:
+    return CATEGORY_SEASON.get(category, "all")
+
 # listedNum = how many other sellers already carry this exact product on CJ.
 # A real test found a product listed by 7,673 sellers - that's not "proven
 # demand," it's "impossible to differentiate from." Anything past

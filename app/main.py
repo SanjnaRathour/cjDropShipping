@@ -26,7 +26,7 @@ from app.gemini_client import (
 from app.image_export import export_image, UnknownCanvasError
 from app.instagram_specs import check_image_for_instagram, check_video_for_instagram
 from app.pinterest_specs import check_image_for_pinterest
-from app.picker import run_scan, load_last_scan, _score_product
+from app.picker import run_scan, load_last_scan, _score_product, season_for_category
 
 PLATFORMS = ("instagram", "pinterest")
 
@@ -261,6 +261,7 @@ def dashboard(request: Request):
             platforms = posted.get(str(p["pid"]), {}).get("platforms", {})
             p["posted_instagram"] = platforms.get("instagram")
             p["posted_pinterest"] = platforms.get("pinterest")
+            p["season"] = season_for_category(p["category"])
             return p
 
         generated_at = data.get("generated_at")
