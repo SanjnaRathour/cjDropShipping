@@ -34,28 +34,24 @@ from app.db import DBError
 # everything. The aesthetic is enforced separately by is_cute() below, using
 # CUTENESS_KEYWORDS from .env - that's the only place "cute" should be checked.
 #
-# target_retail is a realistic fixed market price for that product type -
-# using landed_cost x markup for everything would make every product's
-# margin come out roughly identical regardless of what it actually sells
-# for, which defeats the point of ranking by margin.
 CATEGORIES = [
-    {"name": "Hair Accessories", "keywords": ["hair clip", "hair tie", "hair band", "scrunchie"], "target_retail": 12.99},
-    {"name": "Phone Accessories", "keywords": ["phone charm", "phone case"], "target_retail": 14.99},
-    {"name": "Stationery & Desk", "keywords": ["stationery", "desk organizer"], "target_retail": 9.99},
-    {"name": "Keychains & Charms", "keywords": ["keychain", "bag charm"], "target_retail": 8.99},
+    {"name": "Hair Accessories", "keywords": ["hair clip", "hair tie", "hair band", "scrunchie"]},
+    {"name": "Phone Accessories", "keywords": ["phone charm", "phone case"]},
+    {"name": "Stationery & Desk", "keywords": ["stationery", "desk organizer"]},
+    {"name": "Keychains & Charms", "keywords": ["keychain", "bag charm"]},
     # Clothing/jewelry run far more sellers-per-listing industry-wide on CJ
     # than small accessories do (confirmed live: 0/100 "dress"/"bracelet"/
     # "necklace" results pass the default 300 cutoff) - a higher threshold
     # here isn't "letting in more competition," it's the actual realistic
     # floor for these categories.
-    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "target_retail": 11.99, "saturation_threshold": 1500},
-    {"name": "Dresses", "keywords": ["dress"], "target_retail": 29.99, "saturation_threshold": 1500},
+    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "saturation_threshold": 1500},
+    {"name": "Dresses", "keywords": ["dress"], "saturation_threshold": 1500},
     # Clothing titles almost never contain an explicit "cute/kawaii/pastel"
     # word even when the item clearly is (confirmed live: only 1/100
     # "blouse" results passed the cuteness filter) - style here is visual,
     # not a title keyword, so this category skips that check.
-    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "target_retail": 19.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Skirts", "keywords": ["skirt"], "target_retail": 22.99, "saturation_threshold": 1500},
+    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Skirts", "keywords": ["skirt"], "saturation_threshold": 1500},
     # CJ's search for a compound phrase like "christmas hair clip" mostly
     # ignores "christmas" and just returns generic hair clips (confirmed
     # live: 0/100 titles even contained the word) - search broad festive
@@ -65,23 +61,22 @@ CATEGORIES = [
     {
         "name": "Christmas & Festive",
         "keywords": ["christmas", "santa", "snowman", "snowflake"],
-        "target_retail": 11.99,
         "allow_seasonal": True,
         "must_contain_any": ["hair clip", "hairpin", "earrings", "necklace", "bracelet", "ring", "keychain", "phone case", "charm"],
     },
-    {"name": "Bags & Purses", "keywords": ["mini bag", "crossbody bag"], "target_retail": 15.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Sunglasses", "keywords": ["sunglasses"], "target_retail": 12.99, "saturation_threshold": 1500},
+    {"name": "Bags & Purses", "keywords": ["mini bag", "crossbody bag"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Sunglasses", "keywords": ["sunglasses"], "saturation_threshold": 1500},
     # Real comparables (Shein/Walmart): single-pair novelty socks sell for
     # $1.50-$5.79, never near $9.99 - the old target was too high across
     # every product in this category, not just one.
-    {"name": "Socks & Legwear", "keywords": ["socks"], "target_retail": 5.99, "saturation_threshold": 1500},
+    {"name": "Socks & Legwear", "keywords": ["socks"], "saturation_threshold": 1500},
     # Same "clothing titles don't say cute" issue as Tops & Blouses/Bags -
     # verified live, all four need require_cute off to get real volume.
-    {"name": "Winter Boots & Shoes", "keywords": ["snow boots", "winter boots"], "target_retail": 29.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Coats & Jackets", "keywords": ["winter coat", "padded jacket"], "target_retail": 34.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Winter Dresses & Tops", "keywords": ["knit dress", "turtleneck"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Scarves & Gloves", "keywords": ["scarf", "winter gloves"], "target_retail": 11.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Winter Boots & Shoes", "keywords": ["snow boots", "winter boots"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Coats & Jackets", "keywords": ["winter coat", "padded jacket"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Winter Dresses & Tops", "keywords": ["knit dress", "turtleneck"], "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Scarves & Gloves", "keywords": ["scarf", "winter gloves"], "saturation_threshold": 1500, "require_cute": False},
 ]
 
 TOP_PER_CATEGORY = 10
@@ -180,9 +175,7 @@ def _score_product(
     client: CJClient,
     p: dict,
     category_name: str,
-    target_retail: float,
     destination_countries: list[str],
-    markup: float,
     log,
 ) -> dict | None:
     pid = p.get("id")
@@ -209,33 +202,18 @@ def _score_product(
 
     # WED2C bills shipping to the buyer separately by default (confirmed:
     # its own "Estimated Earning" = price - cost, shipping not subtracted) -
-    # so shipping is not a seller cost and must not reduce margin/breakeven.
-    # It only decides which market-price floor to use below.
-    worst_shipping = max(v["shipping_cost"] for v in per_country.values())
-    landed_worst = round(cost + worst_shipping, 2)
+    # so shipping is not a seller cost and must not reduce margin/breakeven,
+    # and it's excluded from the suggested price too. A flat category target
+    # (same number for every product regardless of its own cost) kept
+    # producing unrealistic suggestions - a plain 50% markup on THIS item's
+    # own cost scales naturally instead: cheap items suggest cheap, pricier
+    # items suggest more, never the same number for everything.
+    retail = round(cost * 1.5, 2)
+    retail_source = "50% markup on cost"
 
     listed_num = int(p.get("listedNum") or 0)
     competition = competition_label(listed_num)
     is_saturated = competition == "Saturated"
-
-    # A flat category target price assumes a normal market - once hundreds
-    # of sellers are reselling the exact same CJ listing (confirmed live:
-    # a $0.28-cost item the category target priced at $11.99, when other
-    # sellers already have it at $1.50), that assumption breaks. Fall back
-    # to the cost-based formula instead, same as when there's no category
-    # target at all, so the suggestion scales with THIS item's real cost.
-    if target_retail > landed_worst and not is_saturated:
-        retail = round(target_retail, 2)
-        retail_source = "category target price"
-    else:
-        retail = round(landed_worst * markup, 2)
-        retail_source = f"{markup}x markup"
-        max_retail = round(cost / 0.4, 2)  # cap at 60% margin - only the
-        if retail > max_retail:            # markup fallback can run away
-            retail = max_retail             # like this; a category target
-            retail_source += ", capped at 60% margin"  # price is already realistic
-        if is_saturated:
-            retail_source += " (category price skipped - saturated)"
 
     for country, v in per_country.items():
         margin = round(retail - cost, 2)
@@ -283,7 +261,6 @@ def run_scan(
     client: CJClient,
     cuteness_keywords: list[str],
     destination_countries: list[str],
-    markup: float,
     log=print,
 ) -> dict:
     categories_out = []
@@ -352,7 +329,7 @@ def run_scan(
         log(f"  scoring {len(merged)} candidates (variant + shipping lookups, ~1/sec)...")
         enriched = []
         for p in merged:
-            scored = _score_product(client, p, cat["name"], cat["target_retail"], destination_countries, markup, log)
+            scored = _score_product(client, p, cat["name"], destination_countries, log)
             if scored:
                 enriched.append(scored)
                 log(

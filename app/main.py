@@ -40,7 +40,6 @@ app = FastAPI(title="Mirthovia Product Scanner")
 CJ_API_KEY = os.getenv("CJ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 DESTINATION_COUNTRIES = [c.strip() for c in os.getenv("DESTINATION_COUNTRIES", "IN").split(",") if c.strip()]
-MARKUP_MULTIPLIER = float(os.getenv("MARKUP_MULTIPLIER", "3.5"))
 CUTENESS_KEYWORDS = [k.strip().lower() for k in os.getenv("CUTENESS_KEYWORDS", "cute,kawaii,pastel").split(",") if k.strip()]
 USD_TO_INR = float(os.getenv("USD_TO_INR", "88.0"))
 
@@ -151,7 +150,7 @@ def _run_scan_job():
         SCAN_STATE["logs"] = []
         SCAN_STATE["error"] = None
     try:
-        data = run_scan(get_client(), CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, MARKUP_MULTIPLIER, log=_scan_log)
+        data = run_scan(get_client(), CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, log=_scan_log)
         with SCAN_LOCK:
             SCAN_STATE["status"] = "done"
             SCAN_STATE["data"] = data
@@ -219,7 +218,7 @@ def add_link(link: str = Form(...), return_to: str = Form("/")):
             "sellPrice": detail.get("sellPrice"),
             "listedNum": detail.get("listedNum"),
         }
-        scored = _score_product(client, raw, "Manually Added", 0, DESTINATION_COUNTRIES, MARKUP_MULTIPLIER, log=print)
+        scored = _score_product(client, raw, "Manually Added", DESTINATION_COUNTRIES, log=print)
     except (CJAPIError, DBError) as e:
         _log_fetch_attempt(link, pid, "error", error=str(e))
         return RedirectResponse(f"{return_to}?add_error={e}", status_code=303)

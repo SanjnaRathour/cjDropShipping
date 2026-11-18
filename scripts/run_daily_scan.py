@@ -22,10 +22,9 @@ from app.picker import run_scan
 
 CJ_API_KEY = os.getenv("CJ_API_KEY", "")
 DESTINATION_COUNTRIES = [c.strip() for c in os.getenv("DESTINATION_COUNTRIES", "IN").split(",") if c.strip()]
-MARKUP_MULTIPLIER = float(os.getenv("MARKUP_MULTIPLIER", "3.5"))
 CUTENESS_KEYWORDS = [k.strip().lower() for k in os.getenv("CUTENESS_KEYWORDS", "cute,kawaii,pastel").split(",") if k.strip()]
 
 if __name__ == "__main__":
     client = CJClient(api_key=CJ_API_KEY)
-    run_scan(client, CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, MARKUP_MULTIPLIER, log=print)
+    run_scan(client, CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, log=print)
     print("Daily scan complete.")
