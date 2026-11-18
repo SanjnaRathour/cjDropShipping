@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Mirthovia — {{ product.name if product else "Product" }}</title>
   <style>
-    :root { --coral: #FF8FA3; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; --warn: #b8860b; }
+    :root { --coral: #FF4D73; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; --warn: #b8860b; }
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
     .wrap { max-width: 980px; margin: 0 auto; }
@@ -90,33 +90,33 @@
         <a href="{{ product.product_url }}" target="_blank" rel="noopener">View on CJ</a>
         {% if product.posted_instagram %}
           <span class="posted-badge">📸 IG posted {{ product.posted_instagram[:10] }}</span>
-        {% else %}
-          <form method="post" action="/posted/{{ product.pid }}" style="display:inline">
-            <input type="hidden" name="name" value="{{ product.name }}">
-            <input type="hidden" name="platform" value="instagram">
-            <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
-            <button type="submit">Mark posted on Instagram</button>
-          </form>
         {% endif %}
+        <form method="post" action="/posted/{{ product.pid }}" style="display:inline">
+          <input type="hidden" name="name" value="{{ product.name }}">
+          <input type="hidden" name="platform" value="instagram">
+          <input type="hidden" name="posted" value="{{ 'false' if product.posted_instagram else 'true' }}">
+          <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
+          <button type="submit">{{ '↺ Un-mark Instagram' if product.posted_instagram else 'Mark posted on Instagram' }}</button>
+        </form>
         {% if product.posted_pinterest %}
           <span class="posted-badge">📌 Pinterest posted {{ product.posted_pinterest[:10] }}</span>
-        {% else %}
-          <form method="post" action="/posted/{{ product.pid }}" style="display:inline">
-            <input type="hidden" name="name" value="{{ product.name }}">
-            <input type="hidden" name="platform" value="pinterest">
-            <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
-            <button type="submit">Mark posted on Pinterest</button>
-          </form>
         {% endif %}
+        <form method="post" action="/posted/{{ product.pid }}" style="display:inline">
+          <input type="hidden" name="name" value="{{ product.name }}">
+          <input type="hidden" name="platform" value="pinterest">
+          <input type="hidden" name="posted" value="{{ 'false' if product.posted_pinterest else 'true' }}">
+          <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
+          <button type="submit">{{ '↺ Un-mark Pinterest' if product.posted_pinterest else 'Mark posted on Pinterest' }}</button>
+        </form>
         {% if product.added_to_store %}
           <span class="posted-badge">🏪 Added to store {{ product.added_to_store[:10] }}</span>
-        {% else %}
-          <form method="post" action="/added-to-store/{{ product.pid }}" style="display:inline">
-            <input type="hidden" name="name" value="{{ product.name }}">
-            <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
-            <button type="submit">🏪 Mark added to store</button>
-          </form>
         {% endif %}
+        <form method="post" action="/added-to-store/{{ product.pid }}" style="display:inline">
+          <input type="hidden" name="name" value="{{ product.name }}">
+          <input type="hidden" name="added" value="{{ 'false' if product.added_to_store else 'true' }}">
+          <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
+          <button type="submit">{{ '✗ Remove from store' if product.added_to_store else '🏪 Mark added to store' }}</button>
+        </form>
         <form method="post" action="/reject/{{ product.pid }}" style="display:inline">
           <input type="hidden" name="name" value="{{ product.name }}">
           <input type="hidden" name="rejected" value="{{ 'false' if product.rejected else 'true' }}">

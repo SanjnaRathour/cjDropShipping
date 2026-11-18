@@ -50,19 +50,27 @@ def load_posted() -> dict:
 
 
 def mark_posted(pid: str, name: str, platform: str):
+    set_posted(pid, name, platform, posted=True)
+
+
+def set_posted(pid: str, name: str, platform: str, posted: bool):
     db = get_db()
     db.posted_products.update_one(
         {"_id": str(pid)},
-        {"$set": {"name": name, f"platforms.{platform}": datetime.now().isoformat()}},
+        {"$set": {"name": name, f"platforms.{platform}": datetime.now().isoformat() if posted else None}},
         upsert=True,
     )
 
 
 def mark_added_to_store(pid: str, name: str):
+    set_added_to_store(pid, name, added=True)
+
+
+def set_added_to_store(pid: str, name: str, added: bool):
     db = get_db()
     db.posted_products.update_one(
         {"_id": str(pid)},
-        {"$set": {"name": name, "added_to_store": datetime.now().isoformat()}},
+        {"$set": {"name": name, "added_to_store": datetime.now().isoformat() if added else None}},
         upsert=True,
     )
 
@@ -146,6 +154,32 @@ def log_fetch_attempt(key: str, entry: dict):
     db.manual_fetch_log.replace_one({"_id": key}, {**entry, "_id": key}, upsert=True)
 
 
+# --- CJ search results (not scored/added, just a record of what was seen) ---
+
+def log_search_results(query: str, results: list[dict]):
+    """Every raw CJ search hit gets saved here, even ones never clicked
+    "+ Add" - so nothing you searched is lost, without it cluttering "All
+    products" (which only ever reads the scored `products` collection,
+    populated by /add-link - searching alone never writes there)."""
+    if not results:
+        return
+    db = get_db()
+    now = datetime.now().isoformat()
+    for r in results:
+        pid = r.get("pid")
+        if not pid:
+            continue
+        db.search_log.update_one(
+            {"_id": str(pid)},
+            {"$set": {**r, "last_query": query, "last_seen_at": now}},
+            upsert=True,
+        )
+
+
+def get_search_log() -> list:
+    return list(get_db().search_log.find().sort("last_seen_at", -1))
+
+
 # --- CJ product detail/variants/image-check cache ----------------------------
 
 def get_product_cache(pid: str) -> dict | None:
@@ -179,3 +213,40 @@ def get_last_scan() -> dict | None:
 def save_last_scan(result: dict):
     db = get_db()
     db.scan_state.replace_one({"_id": "last_scan"}, {**result, "_id": "last_scan"}, upsert=True)
+
+
+# --- per-run scan history (going forward only - older scans were never
+# tagged with a run id, so they only live in `products`/`last_scan`) -------
+
+def save_scan_run(run_id: str, data: dict):
+    db = get_db()
+    db.scan_runs.replace_one({"_id": run_id}, {**data, "_id": run_id}, upsert=True)
+
+
+def get_scan_runs() -> list:
+    """Summary only (no product lists) - for listing past runs without
+    pulling every product in every one of them into memory just to show a
+    list of timestamps."""
+    docs = get_db().scan_runs.find(
+        {}, {"started_at": 1, "finished_at": 1, "categories.name": 1, "categories.products.pid": 1}
+    ).sort("started_at", -1)
+    out = []
+    for d in docs:
+        out.append({
+            "run_id": d["_id"],
+            "started_at": d.get("started_at"),
+            "finished_at": d.get("finished_at"),
+            "categories": [
+                {"name": c["name"], "count": len(c.get("products", []))}
+                for c in d.get("categories", [])
+            ],
+            "total": sum(len(c.get("products", [])) for c in d.get("categories", [])),
+        })
+    return out
+
+
+def get_scan_run(run_id: str) -> dict | None:
+    doc = get_db().scan_runs.find_one({"_id": run_id})
+    if doc:
+        doc.pop("_id", None)
+    return doc

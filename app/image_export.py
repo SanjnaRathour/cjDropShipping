@@ -1,5 +1,8 @@
 """Resizes a photo to a platform's exact canvas size, fit (not cropped), on a blurred letterbox background."""
 import io
+import os
+import subprocess
+import tempfile
 
 from PIL import Image, ImageFilter
 
@@ -54,3 +57,42 @@ def export_image(image_bytes: bytes, platform: str, canvas: str) -> bytes:
     out = io.BytesIO()
     canvas_img.save(out, format="JPEG", quality=92)
     return out.getvalue()
+
+
+class ConversionError(RuntimeError):
+    pass
+
+
+def export_media(media_bytes: bytes, input_ext: str, platform: str, canvas: str) -> tuple[bytes, str]:
+    """For GIFs and videos (export_image only handles static images, and
+    only keeps a GIF's first frame) - scales and center-crops to the
+    platform's exact canvas size with ffmpeg instead, preserving animation/
+    motion. Output stays a GIF for a GIF input, otherwise becomes an MP4
+    (broadest compatibility for IG/Pinterest uploads) regardless of the
+    input video container."""
+    sizes = CANVAS_SIZES.get(platform)
+    if not sizes or canvas not in sizes:
+        raise UnknownCanvasError(f"Unknown platform/canvas: {platform}/{canvas}")
+    target_w, target_h = sizes[canvas]
+
+    is_gif = input_ext.lower() == ".gif"
+    out_ext = ".gif" if is_gif else ".mp4"
+    vf = f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
+
+    with tempfile.TemporaryDirectory() as td:
+        in_path = os.path.join(td, f"input{input_ext}")
+        out_path = os.path.join(td, f"output{out_ext}")
+        with open(in_path, "wb") as f:
+            f.write(media_bytes)
+
+        cmd = ["ffmpeg", "-y", "-i", in_path, "-vf", vf]
+        if not is_gif:
+            cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart"]
+        cmd += [out_path]
+
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode != 0 or not os.path.exists(out_path):
+            raise ConversionError(result.stderr.decode(errors="ignore")[-800:] or "ffmpeg failed with no output")
+
+        with open(out_path, "rb") as f:
+            return f.read(), out_ext

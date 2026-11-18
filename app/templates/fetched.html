@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Mirthovia — Fetched products</title>
   <style>
-    :root { --coral: #FF8FA3; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; }
+    :root { --coral: #FF4D73; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; }
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
     .wrap { max-width: 900px; margin: 0 auto; }
@@ -27,11 +27,85 @@
     .retry-btn:hover { border-color: var(--coral); color: var(--coral); }
     .view-link { font-size: 0.78rem; font-weight: 700; text-decoration: none; }
     .search-box { width: 100%; max-width: 360px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 0.85rem; margin-bottom: 14px; }
+    .sub-hint { font-size: 0.8rem; color: var(--muted); margin: -8px 0 14px; }
+    .found-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border-bottom: 1px solid var(--line); }
+    .found-row:last-child { border-bottom: none; }
+    .found-row:first-child { border-radius: 10px 10px 0 0; }
+    .found-row:last-child { border-radius: 0 0 10px 10px; }
+    .found-img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; background: #f3f0ec; flex: 0 0 auto; }
+    .found-info { flex: 1; min-width: 0; font-size: 0.82rem; }
+    .found-row form { margin: 0; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <a class="back" href="/">← back to dashboard</a>
+    <h1>Scan runs</h1>
+    <p class="sub-hint">One entry per scan, going forward from when this was added - older scans weren't tagged with
+      a run id, so they only live in "All products" rather than their own entry here.</p>
+
+    {% if not scan_runs %}
+      <p class="empty">No tracked scan runs yet - run a new scan to start one.</p>
+    {% else %}
+      <div class="table-scroll" style="margin-bottom:28px">
+        <table>
+          <thead>
+            <tr>
+              <th>Started</th>
+              <th>Status</th>
+              <th>Categories</th>
+              <th>Total found</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in scan_runs %}
+            <tr>
+              <td>{{ run.started_at[:16] | replace("T", " ") }}</td>
+              <td>
+                {% if run.finished_at %}<span class="status-ok">✓ Finished</span>{% else %}<span class="status-error">⏳ In progress / interrupted</span>{% endif %}
+              </td>
+              <td class="link-text">{{ run.categories | map(attribute="name") | join(", ") }}</td>
+              <td>{{ run.total }}</td>
+              <td><a class="view-link" href="/fetched/scan/{{ run.run_id }}">View →</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <h1>Found but not added ({{ not_added | length }})</h1>
+    <p class="sub-hint">Everything CJ has returned from a scan or a dashboard search that passed the on-brand/competition
+      filters, but was never scored and added to "All products" - either you hadn't clicked "+ Add" yet, or a scan's
+      per-keyword cap skipped it. Add any of these the same way as a search result.</p>
+
+    {% if not not_added %}
+      <p class="empty">Nothing found-but-unadded right now.</p>
+    {% else %}
+      <div class="table-scroll" style="margin-bottom:28px">
+        {% for r in not_added %}
+        <div class="found-row">
+          {% if r.image %}<img src="{{ r.image }}" class="found-img">{% else %}<div class="found-img"></div>{% endif %}
+          <div class="found-info">
+            {{ r.name or r._id }}
+            <div class="link-text">
+              {{ r.cost if r.cost is not none else "cost unknown" }}
+              {% if r.listed_num is not none %} · {{ r.listed_num }} sellers already list this{% endif %}
+              {% if r.last_query %} · found searching "{{ r.last_query }}"{% endif %}
+            </div>
+          </div>
+          <a class="retry-btn" href="{{ r.product_url }}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block">View on CJ</a>
+          <form method="post" action="/add-link">
+            <input type="hidden" name="link" value="{{ r._id }}">
+            <input type="hidden" name="return_to" value="/fetched">
+            <button class="retry-btn" type="submit" style="color:var(--good);border-color:var(--good)">+ Add</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <h1>Products fetched by link</h1>
 
     {% if not entries %}

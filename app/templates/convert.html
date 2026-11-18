@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirthovia — Media Converter</title>
+  <style>
+    :root { --coral: #FF4D73; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    a.back { color: var(--ink); font-size: 0.85rem; text-decoration: none; }
+    a.back:hover { text-decoration: underline; }
+    h1 { font-size: 1.2rem; margin: 10px 0 4px; }
+    .sub { color: var(--muted); font-size: 0.88rem; margin: 0 0 20px; }
+    .panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+    .field-label { font-size: 0.68rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; margin: 0 0 6px; display: block; }
+    #fileInput { width: 100%; padding: 9px 0; font-size: 0.85rem; margin-bottom: 16px; }
+    #platformSelect { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 0.85rem; margin-bottom: 16px; }
+    .convert-btn { width: 100%; background: var(--coral); color: #fff; border: none; border-radius: 8px; padding: 11px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
+    .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .convert-btn:hover:not(:disabled) { filter: brightness(1.05); }
+    #status { font-size: 0.82rem; margin: 14px 0 0; min-height: 1.2em; }
+    #status.error { color: var(--bad); }
+    #status.ok { color: var(--good); }
+    .notice { border: 1px solid var(--line); border-left: 3px solid var(--coral); border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; color: #6b5a55; margin-top: 18px; }
+    .preview { margin-top: 16px; max-width: 100%; border-radius: 8px; border: 1px solid var(--line); display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← back to dashboard</a>
+    <h1>Media Converter</h1>
+    <p class="sub">Resize any image, GIF, or video to an exact Instagram/Pinterest canvas size - not tied to a CJ product, just a general resizer for whatever you've got.</p>
+
+    <div class="panel">
+      <span class="field-label">File (image, GIF, or video)</span>
+      <input type="file" id="fileInput" accept="image/*,video/*,.gif">
+
+      <span class="field-label">Target size</span>
+      <select id="platformSelect">
+        <option value="instagram|square">Instagram — Square 1080×1080</option>
+        <option value="instagram|portrait">Instagram — Portrait 1080×1350</option>
+        <option value="pinterest|standard">Pinterest — Standard Pin 1000×1500</option>
+        <option value="pinterest|square">Pinterest — Square 1000×1000</option>
+      </select>
+
+      <button class="convert-btn" id="convertBtn" onclick="convertMedia()">Convert &amp; Download</button>
+      <p id="status"></p>
+      <img id="previewImg" class="preview">
+    </div>
+
+    <div class="notice">
+      Images are fit onto a blurred letterbox background (nothing gets cropped off). GIFs and videos are instead
+      scaled and center-cropped to fill the exact frame (no letterbox) - videos come back as .mp4, GIFs stay .gif.
+      Large videos can take a little while to process.
+    </div>
+  </div>
+
+  <script>
+    function convertMedia() {
+      const fileInput = document.getElementById("fileInput");
+      const file = fileInput.files[0];
+      const status = document.getElementById("status");
+      const btn = document.getElementById("convertBtn");
+      const preview = document.getElementById("previewImg");
+      status.className = "";
+      preview.style.display = "none";
+
+      if (!file) {
+        status.className = "error";
+        status.textContent = "Choose a file first.";
+        return;
+      }
+
+      const [platform, canvas] = document.getElementById("platformSelect").value.split("|");
+      btn.disabled = true;
+      status.textContent = "Converting... (videos can take a little while)";
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("platform", platform);
+      formData.append("canvas", canvas);
+
+      fetch("/convert-media", { method: "POST", body: formData })
+        .then(async (r) => {
+          if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || `Conversion failed (HTTP ${r.status})`);
+          }
+          return r.blob();
+        })
+        .then((blob) => {
+          const ext = blob.type === "image/gif" ? ".gif" : blob.type === "video/mp4" ? ".mp4" : ".jpg";
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "mirthovia-export" + ext;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          if (blob.type === "image/jpeg") {
+            preview.src = url;
+            preview.style.display = "block";
+          } else {
+            URL.revokeObjectURL(url);
+          }
+          status.className = "ok";
+          status.textContent = "Downloaded.";
+        })
+        .catch((e) => {
+          status.className = "error";
+          status.textContent = e.message;
+        })
+        .finally(() => { btn.disabled = false; });
+    }
+  </script>
+</body>
+</html>

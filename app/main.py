@@ -8,12 +8,12 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Query, Request
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from app import db
-from app.cj_client import CJClient, CJAPIError, summarize_variants
+from app.cj_client import CJClient, CJAPIError, summarize_variants, product_url_for
 from app.db import DBError
 from app.gemini_client import (
     generate_instagram_content,
@@ -23,10 +23,10 @@ from app.gemini_client import (
     estimate_market_price,
     GeminiAPIError,
 )
-from app.image_export import export_image, UnknownCanvasError
+from app.image_export import export_image, export_media, ConversionError, UnknownCanvasError
 from app.instagram_specs import check_image_for_instagram, check_video_for_instagram
 from app.pinterest_specs import check_image_for_pinterest
-from app.picker import run_scan, load_last_scan, _score_product, season_for_category
+from app.picker import run_scan, load_last_scan, _score_product, season_for_category, CATEGORIES
 
 PLATFORMS = ("instagram", "pinterest")
 
@@ -91,8 +91,12 @@ def _log_fetch_attempt(link: str, pid: str | None, status: str, name: str | None
 
 def _extract_pid(link: str) -> str | None:
     """Accepts a raw CJ pid or a product page URL like
-    .../product/some-slug-p-1779495048112394240.html - pulls the numeric pid
-    out of either."""
+    .../product/some-slug-p-1779495048112394240.html - pulls the pid out of
+    either. Most CJ pids are a long numeric string, but some products use a
+    GUID-style id instead (confirmed live) - a bare token with no slashes
+    or spaces is trusted directly rather than requiring digits-only, so
+    those still work, while a multi-word search phrase (which always has
+    spaces) still correctly falls through to None."""
     link = link.strip()
     if link.isdigit():
         return link
@@ -100,7 +104,11 @@ def _extract_pid(link: str) -> str | None:
     if m:
         return m.group(1)
     m = re.search(r"(\d{10,})", link)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Za-z0-9-]{8,}", link):
+        return link
+    return None
 
 
 def _load_posted() -> dict:
@@ -116,14 +124,14 @@ def _load_posted() -> dict:
     return posted
 
 
-def _mark_posted(pid: str, name: str, platform: str):
+def _set_posted(pid: str, name: str, platform: str, posted: bool):
     if platform not in PLATFORMS:
         raise ValueError(f"Unknown platform: {platform}")
-    db.mark_posted(pid, name, platform)
+    db.set_posted(pid, name, platform, posted)
 
 
-def _mark_added_to_store(pid: str, name: str):
-    db.mark_added_to_store(pid, name)
+def _set_added_to_store(pid: str, name: str, added: bool):
+    db.set_added_to_store(pid, name, added)
 
 
 def _set_rejected(pid: str, name: str, rejected: bool):
@@ -152,13 +160,13 @@ def _scan_log(msg: str):
     print(msg)
 
 
-def _run_scan_job():
+def _run_scan_job(categories: list[dict] | None = None):
     with SCAN_LOCK:
         SCAN_STATE["status"] = "running"
         SCAN_STATE["logs"] = []
         SCAN_STATE["error"] = None
     try:
-        data = run_scan(get_client(), CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, log=_scan_log)
+        data = run_scan(get_client(), CUTENESS_KEYWORDS, DESTINATION_COUNTRIES, log=_scan_log, categories=categories)
         with SCAN_LOCK:
             SCAN_STATE["status"] = "done"
             SCAN_STATE["data"] = data
@@ -176,12 +184,51 @@ def _run_scan_job():
         _scan_log(traceback.format_exc())
 
 
+def _validate_custom_categories(raw: list) -> list[dict]:
+    cleaned = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get("name") or "").strip()
+        keywords = [k.strip() for k in (entry.get("keywords") or []) if isinstance(k, str) and k.strip()]
+        if not name or not keywords:
+            continue
+        cat = {"name": name, "keywords": keywords}
+        if entry.get("season") in ("winter", "summer", "all"):
+            cat["season"] = entry["season"]
+        if isinstance(entry.get("saturation_threshold"), (int, float)):
+            cat["saturation_threshold"] = int(entry["saturation_threshold"])
+        if isinstance(entry.get("require_cute"), bool):
+            cat["require_cute"] = entry["require_cute"]
+        cleaned.append(cat)
+    return cleaned
+
+
+@app.get("/scan/categories")
+def scan_categories():
+    """The scan's default category/keyword/season list (from
+    scan_categories.json), so the dashboard's "customize this scan" form
+    has real defaults to pre-fill instead of starting from nothing."""
+    return {"categories": CATEGORIES}
+
+
 @app.post("/scan/run")
-def start_scan():
+async def start_scan(request: Request):
     with SCAN_LOCK:
         if SCAN_STATE["status"] == "running":
             return JSONResponse({"ok": False, "message": "A scan is already running."}, status_code=409)
-    threading.Thread(target=_run_scan_job, daemon=True).start()
+
+    categories = None
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if isinstance(body, dict) and isinstance(body.get("categories"), list):
+        categories = _validate_custom_categories(body["categories"])
+        if not categories:
+            return JSONResponse({"ok": False, "message": "No valid categories - each needs a name and at least one keyword."}, status_code=400)
+
+    threading.Thread(target=_run_scan_job, args=(categories,), daemon=True).start()
     return {"ok": True}
 
 
@@ -194,6 +241,38 @@ def scan_status():
             "error": SCAN_STATE["error"],
             "has_results": SCAN_STATE["data"] is not None,
         }
+
+
+@app.get("/search-cj")
+def search_cj(q: str):
+    """Raw CJ product search by name, bypassing the scan's relevance/
+    cuteness/off-brand/saturation filters entirely - for when the
+    automated pipeline's filters exclude something you can see is actually
+    fine, or you just want to browse what's on CJ for a term. Results here
+    are added individually via /add-link (same pid-or-link acceptance),
+    not scored/saved until you pick one."""
+    q = q.strip()
+    if not q:
+        return JSONResponse({"error": "Enter a search term."}, status_code=400)
+    try:
+        raw = get_client().search_products(q, size=50)
+    except CJAPIError as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    results = [
+        {
+            "pid": str(p.get("id")),
+            "name": p.get("nameEn"),
+            "image": p.get("bigImage"),
+            "cost": p.get("sellPrice"),
+            "listed_num": p.get("listedNum"),
+        }
+        for p in raw
+    ]
+    try:
+        db.log_search_results(q, results)
+    except DBError:
+        pass  # logging is best-effort - never block showing results over it
+    return {"results": results}
 
 
 @app.post("/add-link")
@@ -243,9 +322,41 @@ def add_link(link: str = Form(...), return_to: str = Form("/")):
 
 @app.get("/fetched", response_class=HTMLResponse)
 def fetched_log(request: Request):
+    try:
+        already_added = {str(p["pid"]) for p in db.get_all_products()}
+        not_added = [r for r in db.get_search_log() if str(r.get("_id")) not in already_added]
+        for r in not_added:
+            r["product_url"] = product_url_for(r["_id"], r.get("name") or r["_id"])
+    except DBError:
+        not_added = []
+    try:
+        scan_runs = db.get_scan_runs()
+    except DBError:
+        scan_runs = []
     return templates.TemplateResponse(
         "fetched.html",
-        {"request": request, "entries": _load_fetch_log()},
+        {"request": request, "entries": _load_fetch_log(), "not_added": not_added, "scan_runs": scan_runs},
+    )
+
+
+@app.get("/fetched/scan/{run_id}", response_class=HTMLResponse)
+def scan_run_detail(request: Request, run_id: str):
+    run = db.get_scan_run(run_id)
+    if not run:
+        return templates.TemplateResponse(
+            "scan_run.html",
+            {"request": request, "run_id": run_id, "run": None},
+        )
+    posted = _load_posted()
+    for cat in run.get("categories", []):
+        for p in cat["products"]:
+            p = _with_inr(p, USD_TO_INR)
+            entry = posted.get(str(p["pid"]), {})
+            p["rejected"] = entry.get("rejected")
+            p["added_to_store"] = entry.get("added_to_store")
+    return templates.TemplateResponse(
+        "scan_run.html",
+        {"request": request, "run_id": run_id, "run": run},
     )
 
 
@@ -269,50 +380,41 @@ def dashboard(request: Request):
             with SCAN_LOCK:
                 SCAN_STATE["data"] = data
 
-    all_products = []
-    categories_present = []
-    generated_at = None
-    if data:
-        posted = _load_posted()
-        try:
-            first_seen_dates = db.get_first_seen_dates()
-        except DBError:
-            first_seen_dates = {}
+    generated_at = data.get("generated_at") if data else None
 
-        def _enrich(p):
-            p = _with_inr(p, USD_TO_INR)
-            entry = posted.get(str(p["pid"]), {})
-            platforms = entry.get("platforms", {})
-            p["posted_instagram"] = platforms.get("instagram")
-            p["posted_pinterest"] = platforms.get("pinterest")
-            p["added_to_store"] = entry.get("added_to_store")
-            p["rejected"] = entry.get("rejected")
-            p["season"] = season_for_category(p["category"])
-            p["found_at"] = first_seen_dates.get(str(p["pid"]))
-            return p
+    posted = _load_posted()
+    try:
+        first_seen_dates = db.get_first_seen_dates()
+    except DBError:
+        first_seen_dates = {}
 
-        generated_at = data.get("generated_at")
+    def _enrich(p):
+        p = _with_inr(p, USD_TO_INR)
+        entry = posted.get(str(p["pid"]), {})
+        platforms = entry.get("platforms", {})
+        p["posted_instagram"] = platforms.get("instagram")
+        p["posted_pinterest"] = platforms.get("pinterest")
+        p["added_to_store"] = entry.get("added_to_store")
+        p["rejected"] = entry.get("rejected")
+        p["season"] = season_for_category(p["category"])
+        p["found_at"] = first_seen_dates.get(str(p["pid"]))
+        return p
 
-        # One deduplicated list instead of "top overall" + the same items
-        # repeated again under their category section - categories become a
-        # client-side filter (badges) on this single grid, not separate lists.
-        seen_pids = set()
-        for p in data.get("top_overall", []):
-            seen_pids.add(str(p["pid"]))
-            all_products.append(_enrich(p))
-        for cat in data.get("categories", []):
-            for p in cat["products"]:
-                if str(p["pid"]) in seen_pids:
-                    continue
-                seen_pids.add(str(p["pid"]))
-                all_products.append(_enrich(p))
+    # "All products" is everything ever found, from every source, combined
+    # - not just the latest scan's top-10-per-category trim. A default
+    # scan, a customized scan, a search-and-add, and a pasted link all go
+    # through the same upsert_product() call, so get_all_products() (one
+    # deduplicated entry per pid, its latest snapshot) already covers every
+    # one of them without needing separate per-source merging.
+    try:
+        all_products = [_enrich(p) for p in db.get_all_products()]
+    except DBError:
+        all_products = []
 
-        categories_present = sorted({p["category"] for p in all_products})
-        scan_dates_present = sorted(
-            {p["found_at"][:10] for p in all_products if p.get("found_at")}, reverse=True
-        )
-    else:
-        scan_dates_present = []
+    categories_present = sorted({p["category"] for p in all_products})
+    scan_dates_present = sorted(
+        {p["found_at"][:10] for p in all_products if p.get("found_at")}, reverse=True
+    )
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -332,9 +434,15 @@ def dashboard(request: Request):
 
 
 @app.post("/posted/{pid}")
-def mark_posted(pid: str, name: str = Form(...), platform: str = Form(...), redirect_to: str = Form("/")):
+def mark_posted(
+    pid: str,
+    name: str = Form(...),
+    platform: str = Form(...),
+    posted: str = Form("true"),
+    redirect_to: str = Form("/"),
+):
     try:
-        _mark_posted(pid, name, platform)
+        _set_posted(pid, name, platform, posted == "true")
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     except DBError as e:
@@ -343,9 +451,9 @@ def mark_posted(pid: str, name: str = Form(...), platform: str = Form(...), redi
 
 
 @app.post("/added-to-store/{pid}")
-def added_to_store(pid: str, name: str = Form(...), redirect_to: str = Form("/")):
+def added_to_store(pid: str, name: str = Form(...), added: str = Form("true"), redirect_to: str = Form("/")):
     try:
-        _mark_added_to_store(pid, name)
+        _set_added_to_store(pid, name, added == "true")
     except DBError as e:
         return JSONResponse({"error": str(e)}, status_code=503)
     return RedirectResponse(redirect_to, status_code=303)
@@ -397,12 +505,59 @@ def export_image_route(url: str, platform: str, canvas: str, filename: str = "mi
     )
 
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+@app.get("/convert", response_class=HTMLResponse)
+def convert_page(request: Request):
+    """A standalone Instagram/Pinterest resizer for any file you have on
+    hand - not tied to a CJ product. Images go through the same blurred-
+    letterbox export as a product photo; GIFs/videos go through ffmpeg
+    instead (export_image only keeps a GIF's first frame and can't touch
+    video at all)."""
+    return templates.TemplateResponse("convert.html", {"request": request})
+
+
+@app.post("/convert-media")
+async def convert_media_route(
+    file: UploadFile = File(...),
+    platform: str = Form(...),
+    canvas: str = Form(...),
+):
+    content = await file.read()
+    if not content:
+        return JSONResponse({"error": "That file came through empty."}, status_code=400)
+
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    try:
+        if ext in IMAGE_EXTS:
+            out_bytes = export_image(content, platform, canvas)
+            out_ext = ".jpg"
+        else:
+            out_bytes, out_ext = export_media(content, ext, platform, canvas)
+    except UnknownCanvasError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ConversionError as e:
+        return JSONResponse({"error": f"Conversion failed: {e}"}, status_code=500)
+
+    media_type = "image/gif" if out_ext == ".gif" else "video/mp4" if out_ext == ".mp4" else "image/jpeg"
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="mirthovia-export{out_ext}"'},
+    )
+
+
 @app.get("/collection-download")
-def collection_download_route(pids: list[str] = Query(...)):
+def collection_download_route(pids: list[str] = Query(...), variant: str = "original"):
     """Each selected product's main photo as its own file in one zip - for
     posting them together as an Instagram carousel (or building your own
     collage in Canva) without merging them into a single image yourself."""
     import requests as _requests
+
+    if variant not in DOWNLOAD_VARIANTS:
+        return JSONResponse({"error": f"Unknown variant: {variant}"}, status_code=400)
+    platform_canvas = DOWNLOAD_VARIANTS[variant]
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -413,10 +568,20 @@ def collection_download_route(pids: list[str] = Query(...)):
             try:
                 r = _requests.get(product["image"], timeout=30)
                 r.raise_for_status()
+                content = r.content
             except Exception:
                 continue
-            ext = ".png" if product["image"].lower().endswith(".png") else ".jpg"
-            zf.writestr(f"{i:02d}-{_safe_filename(product['name'])}{ext}", r.content)
+
+            if platform_canvas:
+                try:
+                    content = export_image(content, *platform_canvas)
+                    ext = ".jpg"
+                except Exception:
+                    continue  # skip a photo that fails to export rather than fail the whole zip
+            else:
+                ext = ".png" if product["image"].lower().endswith(".png") else ".jpg"
+
+            zf.writestr(f"{i:02d}-{_safe_filename(product['name'])}{ext}", content)
 
     buf.seek(0)
     return StreamingResponse(

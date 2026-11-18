@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirthovia — Scan run</title>
+  <style>
+    :root { --coral: #FF4D73; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    a { color: var(--coral); }
+    a.back { color: var(--ink); font-size: 0.85rem; text-decoration: none; }
+    a.back:hover { text-decoration: underline; }
+    h1 { font-size: 1.2rem; margin: 10px 0 4px; }
+    h2.section { font-size: 0.9rem; margin: 26px 0 10px; color: #6b5a55; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 20px; }
+    .empty { color: var(--muted); padding: 16px 0; font-size: 0.9rem; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    .card { display: flex; gap: 10px; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .card img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #f3f0ec; flex: 0 0 auto; }
+    .card-info { flex: 1; min-width: 0; font-size: 0.8rem; }
+    .card-name { font-weight: 600; margin-bottom: 2px; }
+    .margin-chip { color: var(--good); font-weight: 700; font-size: 0.78rem; }
+    .badge { font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
+    .badge.rejected { background: #ffe3e3; color: var(--bad); }
+    .badge.store { background: #e3fcef; color: #0a7a46; }
+    .view-link { font-size: 0.75rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/fetched">← back to history</a>
+    {% if not run %}
+      <h1>Scan run not found</h1>
+      <p class="empty">No scan run with id "{{ run_id }}" - it may have been from before scan runs were tracked individually.</p>
+    {% else %}
+      <h1>Scan run — {{ run.started_at[:16] | replace("T", " ") }}</h1>
+      <p class="sub">
+        {% if run.finished_at %}Finished {{ run.finished_at[:16] | replace("T", " ") }}{% else %}⏳ In progress or was interrupted before finishing{% endif %}
+        · every product found this run that passed the on-brand/competition filters, not just whichever made that
+        category's top 10 on the dashboard.
+      </p>
+
+      {% if not run.categories %}
+        <p class="empty">Nothing found yet in this run.</p>
+      {% endif %}
+
+      {% for cat in run.categories %}
+        <h2 class="section">{{ cat.name }} ({{ cat.products | length }})</h2>
+        {% if not cat.products %}
+          <p class="empty">Nothing passed the filters for this category this run.</p>
+        {% else %}
+        <div class="grid">
+          {% for p in cat.products %}
+          <div class="card">
+            {% if p.image %}<img src="{{ p.image }}">{% else %}<img>{% endif %}
+            <div class="card-info">
+              <div class="card-name">{{ p.name }}</div>
+              <span class="margin-chip">{{ p.worst_case_margin_pct }}% margin</span>
+              {% if p.rejected %}<span class="badge rejected">Rejected</span>{% endif %}
+              {% if p.added_to_store %}<span class="badge store">In store</span>{% endif %}
+            </div>
+            <a class="view-link" href="/product/{{ p.pid }}">View →</a>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </div>
+</body>
+</html>

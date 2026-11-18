@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Mirthovia — Product Scanner</title>
   <style>
-    :root { --coral: #FF8FA3; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; }
+    :root { --coral: #FF4D73; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; --bad: #c0392b; }
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
     .wrap { max-width: 1240px; margin: 0 auto; }
@@ -15,6 +15,14 @@
 
     .panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin-bottom: 18px; }
     .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .scan-cat-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .scan-cat-row:last-child { border-bottom: none; }
+    .scan-cat-name-select, .scan-cat-name-custom { flex: 0 0 160px; min-width: 0; font-size: 0.8rem; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); }
+    .scan-cat-row .dropdown-filter { flex: 1; min-width: 0; }
+    .scan-cat-row .dropdown-toggle { width: 100%; text-align: left; }
+    .scan-cat-season { flex: 0 0 auto; font-size: 0.8rem; padding: 6px 4px; border-radius: 6px; border: 1px solid var(--line); }
+    .scan-cat-remove { flex: 0 0 auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.9rem; }
+    .scan-cat-remove:hover { color: var(--bad); }
     button.run-btn { background: var(--coral); color: #fff; border: none; border-radius: 8px; padding: 9px 18px; font-weight: 700; cursor: pointer; font-size: 0.88rem; }
     button.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .badge { padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
@@ -81,6 +89,7 @@
     .col-status { flex: 0 0 auto; white-space: nowrap; }
     .posted-chip { display: block; color: var(--muted); font-size: 0.72rem; font-weight: 600; }
     .posted-chip.active { color: var(--good); }
+    .posted-chip.rejected-chip { color: var(--bad); font-weight: 700; }
     .col-actions { flex: 0 0 auto; }
     .row-menu { position: relative; }
     .kebab-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 1rem; font-weight: 700; line-height: 1; cursor: pointer; }
@@ -123,22 +132,50 @@
 
     <div class="panel">
       <div class="controls">
-        <button class="run-btn" id="runBtn" onclick="runScan()">Run new scan</button>
+        <button class="run-btn" id="runBtn" onclick="runScan(false)">Run new scan</button>
+        <button class="run-btn" id="customizeBtn" style="background:#fff;color:var(--ink);border:1px solid var(--line)" onclick="toggleScanConfig()">⚙ Customize scan</button>
         <span style="font-size:0.85rem">Status: <span class="badge idle" id="statusBadge">{{ status }}</span></span>
         <span id="statusMsg" style="font-size:0.8rem;color:var(--muted)"></span>
+      </div>
+      <div id="scanConfigPanel" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+        <p style="font-size:0.78rem;color:var(--muted);margin:0 0 10px">
+          Uncheck a category to skip it this run, edit its keywords/season, or add a one-off search.
+          Defaults come from <code>scan_categories.json</code> and aren't changed unless you edit that file.
+        </p>
+        <div id="scanCategoryRows"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="clear-filters-btn" onclick="addScanCategoryRow()">+ Add category</button>
+          <button type="button" class="clear-filters-btn" onclick="setAllScanCategories(true)">Select all</button>
+          <button type="button" class="clear-filters-btn" onclick="setAllScanCategories(false)">Select none</button>
+          <button class="run-btn" id="runCustomBtn" onclick="runScan(true)" style="margin-left:auto">▶ Run scan with these settings</button>
+        </div>
       </div>
       <div id="log"></div>
     </div>
 
     <div class="panel">
-      <form method="post" action="/add-link" style="display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" name="link" placeholder="Paste a CJ product link (or just the product ID)" required
-               style="flex:1;min-width:240px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);font-size:0.85rem">
-        <button class="run-btn" type="submit">Fetch product</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="searchCjInput" placeholder="Short keywords, a product ID, or a CJ link"
+               style="flex:1;min-width:240px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);font-size:0.85rem"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();searchCj();}">
+        <button class="run-btn" type="button" onclick="searchCj()">Search</button>
         <a href="/fetched" target="_blank" rel="noopener"
            style="font-size:0.85rem;font-weight:700;padding:9px 16px;border-radius:8px;border:1px solid var(--line);color:var(--ink);text-decoration:none;white-space:nowrap">History</a>
-      </form>
-      {% if add_error %}<p style="color:#a32020;font-size:0.8rem;margin:10px 0 0">{{ add_error }}</p>{% endif %}
+        <a href="/convert" target="_blank" rel="noopener"
+           style="font-size:0.85rem;font-weight:700;padding:9px 16px;border-radius:8px;border:1px solid var(--line);color:var(--ink);text-decoration:none;white-space:nowrap">🖼 Media Converter</a>
+      </div>
+      {% if add_error %}<p style="color:#a32020;font-size:0.8rem;margin:8px 0 0">{{ add_error }}</p>{% endif %}
+      <p style="font-size:0.74rem;color:var(--muted);margin:8px 0 0">
+        Raw CJ search, not filtered by relevance/cuteness/competition like a scan - use this when something you
+        know exists didn't make a scan's cut, or to browse before adding it manually. Added items show up in
+        "All products" below like any scan result. Paste a product ID or CJ link here too - it'll fetch that
+        exact product directly instead of keyword-searching for it. For keyword searches, 2-4 short words work
+        best (e.g. "crossbody shopper bag") - pasting a full product title tends to return unrelated results.
+      </p>
+      <p id="searchLongWarning" style="display:none;font-size:0.76rem;color:var(--bad);margin:6px 0 0">
+        That's a lot of words - CJ's search often returns unrelated results for long phrases. Try 2-4 keywords instead (e.g. the product's category + one distinctive word).
+      </p>
+      <div id="searchResults" style="display:none;margin-top:12px"></div>
     </div>
 
     {% if not all_products %}
@@ -161,6 +198,7 @@
           <span class="competition-chip competition-{{ p.competition | lower }}">{{ p.competition }}</span>
         </div>
         <div class="col-status">
+          {% if p.rejected %}<span class="posted-chip rejected-chip">🗑 Rejected</span>{% endif %}
           <span class="posted-chip{{ ' active' if p.posted_instagram else '' }}">📸 IG</span>
           <span class="posted-chip{{ ' active' if p.posted_pinterest else '' }}">📌 Pin</span>
           <span class="posted-chip{{ ' active' if p.added_to_store else '' }}">🏪 Store</span>
@@ -171,16 +209,36 @@
             <div class="dropdown-panel row-menu-panel" id="rowMenu{{ p.pid }}" style="display:none">
               <a class="dropdown-option" href="/product/{{ p.pid }}">View</a>
               <a class="dropdown-option" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ</a>
-              <a class="dropdown-option" href="/download-all/{{ p.pid }}">⬇ Download photos</a>
+              <select class="dropdown-option-btn" style="cursor:pointer" onchange="if(this.value) window.location.href=this.value">
+                <option value="" selected disabled>⬇ Download photos...</option>
+                <option value="/download-all/{{ p.pid }}?variant=original">Original (full res, as-is)</option>
+                <option value="/download-all/{{ p.pid }}?variant=instagram-square">Instagram — Square 1080×1080</option>
+                <option value="/download-all/{{ p.pid }}?variant=instagram-portrait">Instagram — Portrait 1080×1350</option>
+                <option value="/download-all/{{ p.pid }}?variant=pinterest-standard">Pinterest — Standard Pin 1000×1500</option>
+                <option value="/download-all/{{ p.pid }}?variant=pinterest-square">Pinterest — Square 1000×1000</option>
+              </select>
               <button type="button" class="dropdown-option-btn" onclick="copyChatGptPrompt('{{ p.pid }}', this)">📋 Copy prompt for ChatGPT</button>
               <div class="dropdown-divider"></div>
-              {% if not p.added_to_store %}
+              <form method="post" action="/posted/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="platform" value="instagram">
+                <input type="hidden" name="posted" value="{{ 'false' if p.posted_instagram else 'true' }}">
+                <input type="hidden" name="redirect_to" value="/">
+                <button type="submit" class="dropdown-option-btn">{{ '↺ Un-mark Instagram' if p.posted_instagram else '📸 Mark posted on Instagram' }}</button>
+              </form>
+              <form method="post" action="/posted/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="platform" value="pinterest">
+                <input type="hidden" name="posted" value="{{ 'false' if p.posted_pinterest else 'true' }}">
+                <input type="hidden" name="redirect_to" value="/">
+                <button type="submit" class="dropdown-option-btn">{{ '↺ Un-mark Pinterest' if p.posted_pinterest else '📌 Mark posted on Pinterest' }}</button>
+              </form>
               <form method="post" action="/added-to-store/{{ p.pid }}">
                 <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="added" value="{{ 'false' if p.added_to_store else 'true' }}">
                 <input type="hidden" name="redirect_to" value="/">
-                <button type="submit" class="dropdown-option-btn">🏪 Added to store</button>
+                <button type="submit" class="dropdown-option-btn">{{ '✗ Remove from store' if p.added_to_store else '🏪 Added to store' }}</button>
               </form>
-              {% endif %}
               <form method="post" action="/reject/{{ p.pid }}">
                 <input type="hidden" name="name" value="{{ p.name }}">
                 <input type="hidden" name="rejected" value="{{ 'false' if p.rejected else 'true' }}">
@@ -287,6 +345,13 @@
 
   <div class="selection-bar" id="selectionBar">
     <span id="selectionCount">0 selected</span>
+    <select id="collectionVariantSelect" onchange="updateSelectionBar()">
+      <option value="original">Original (full res)</option>
+      <option value="instagram-square">Instagram — Square 1080×1080</option>
+      <option value="instagram-portrait">Instagram — Portrait 1080×1350</option>
+      <option value="pinterest-standard">Pinterest — Standard Pin 1000×1500</option>
+      <option value="pinterest-square">Pinterest — Square 1000×1000</option>
+    </select>
     <a id="downloadSelectedBtn" href="#" style="background:#fff;color:var(--ink);text-decoration:none;font-weight:700;padding:7px 14px;border-radius:6px;font-size:0.8rem">⬇ Download photos (ZIP)</a>
     <button onclick="generateCollectionCaption()">✨ Generate caption</button>
     <button class="clear-btn" onclick="copyCollectionPrompt()">📋 Copy prompt for ChatGPT</button>
@@ -325,6 +390,78 @@
       });
     }
 
+    function escapeHtml(s) {
+      const div = document.createElement("div");
+      div.textContent = s || "";
+      return div.innerHTML;
+    }
+
+    function searchCj() {
+      const q = document.getElementById("searchCjInput").value.trim();
+      const resultsBox = document.getElementById("searchResults");
+      if (!q) return;
+
+      // A raw pid or a pasted CJ product link both contain a 10+ digit
+      // run - CJ's keyword search can't find an exact product by its
+      // numeric id (the digits don't appear in the product's name), so
+      // route this straight to a direct fetch instead, same as the
+      // "Paste a CJ product link" box above.
+      if (/\d{10,}/.test(q)) {
+        resultsBox.style.display = "block";
+        resultsBox.innerHTML = "Looks like a product ID/link - fetching it directly...";
+        const form = document.createElement("form");
+        form.method = "post";
+        form.action = "/add-link";
+        form.style.display = "none";
+        form.innerHTML = `<input type="hidden" name="link" value="${escapeHtml(q)}">
+          <input type="hidden" name="return_to" value="/">`;
+        document.body.appendChild(form);
+        form.submit();
+        return;
+      }
+
+      document.getElementById("searchLongWarning").style.display = q.split(/\s+/).length > 5 ? "block" : "none";
+      resultsBox.style.display = "block";
+      resultsBox.innerHTML = "Searching CJ...";
+      fetch("/search-cj?q=" + encodeURIComponent(q))
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) { resultsBox.innerHTML = "Failed: " + escapeHtml(data.error || "unknown error"); return; }
+          if (!data.results.length) { resultsBox.innerHTML = "No results on CJ for that search."; return; }
+          resultsBox.innerHTML = `<p style="font-size:0.76rem;color:var(--muted);margin:0 0 8px">${data.results.length} results</p>`
+            + data.results.map(searchResultRowHtml).join("");
+        })
+        .catch(() => { resultsBox.innerHTML = "Could not reach the server."; });
+    }
+
+    function searchResultRowHtml(p) {
+      const imgHtml = p.image
+        ? `<img src="${escapeHtml(p.image)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;background:#f3f0ec;flex:0 0 auto">`
+        : `<div style="width:48px;height:48px;border-radius:6px;background:#f3f0ec;flex:0 0 auto"></div>`;
+      // cost can be a plain number ("1.84") or a variable-price range
+      // ("1.84 -- 17.60") - Number() on the latter is NaN, so only format
+      // it as currency when it's cleanly numeric, otherwise show as-is.
+      let cost = "cost unknown";
+      if (p.cost != null) {
+        const n = Number(p.cost);
+        cost = Number.isFinite(n) ? "$" + n.toFixed(2) : "$" + p.cost;
+      }
+      const listed = p.listed_num != null ? p.listed_num + " sellers already list this" : "";
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+          ${imgHtml}
+          <div style="flex:1;min-width:0;font-size:0.82rem">
+            ${escapeHtml(p.name || p.pid)}
+            <div style="font-size:0.72rem;color:var(--muted)">${cost} · ${listed}</div>
+          </div>
+          <form method="post" action="/add-link" style="margin:0">
+            <input type="hidden" name="link" value="${escapeHtml(p.pid)}">
+            <input type="hidden" name="return_to" value="/">
+            <button type="submit" class="run-btn" style="padding:6px 12px;font-size:0.78rem">+ Add</button>
+          </form>
+        </div>`;
+    }
+
     function copyChatGptPrompt(pid, btn) {
       const original = btn.textContent;
       btn.textContent = "Copying...";
@@ -361,8 +498,24 @@
       if (panel.classList.contains("row-menu-panel")) {
         const rect = e.currentTarget.getBoundingClientRect();
         panel.style.position = "fixed";
-        panel.style.top = (rect.bottom + 4) + "px";
         panel.style.left = Math.max(8, rect.right - panel.offsetWidth) + "px";
+
+        // A fixed-position panel doesn't scroll with the page - if it opens
+        // downward near the bottom of the viewport, whatever falls past
+        // window height is just unreachable (not merely clipped). Measure
+        // available space both ways and open upward instead when there's
+        // more (or just enough) room above.
+        const margin = 8;
+        const spaceBelow = window.innerHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+        panel.style.maxHeight = Math.max(spaceBelow, spaceAbove, 120) + "px";
+        if (panel.scrollHeight > spaceBelow && spaceAbove > spaceBelow) {
+          panel.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+          panel.style.top = "auto";
+        } else {
+          panel.style.top = (rect.bottom + 4) + "px";
+          panel.style.bottom = "auto";
+        }
       }
     }
 
@@ -371,6 +524,16 @@
         document.querySelectorAll(".dropdown-panel").forEach(p => p.style.display = "none");
       }
     });
+
+    // A row's "..." menu is position:fixed, computed once from the button's
+    // screen position when it opens - it does NOT follow the page on
+    // scroll, so it'd otherwise float frozen over whatever scrolls
+    // underneath it and block clicks there. Close it on any scroll instead
+    // of letting it go stale. Capture phase catches scrolling inside any
+    // scrollable container too, not just the window itself.
+    window.addEventListener("scroll", () => {
+      document.querySelectorAll(".row-menu-panel").forEach(p => p.style.display = "none");
+    }, { passive: true, capture: true });
 
     function setAllInGroup(className, checked) {
       document.querySelectorAll("." + className).forEach(cb => cb.checked = checked);
@@ -571,7 +734,8 @@
       if (count === 0) document.getElementById("captionResult").textContent = "";
 
       const params = Array.from(selected.keys()).map(pid => "pids=" + encodeURIComponent(pid)).join("&");
-      document.getElementById("downloadSelectedBtn").href = "/collection-download?" + params;
+      const variant = document.getElementById("collectionVariantSelect").value;
+      document.getElementById("downloadSelectedBtn").href = "/collection-download?" + params + "&variant=" + variant;
     }
 
     function generateCollectionCaption() {
@@ -618,21 +782,168 @@
       document.getElementById("statusMsg").textContent = msg || "";
     }
 
-    function runScan() {
+    let scanConfigLoaded = false;
+    let scanRowSeq = 0;
+    let ALL_KNOWN_KEYWORDS = [];
+    let ALL_KNOWN_CATEGORY_NAMES = [];
+
+    function toggleScanConfig() {
+      const panel = document.getElementById("scanConfigPanel");
+      const opening = panel.style.display === "none";
+      panel.style.display = opening ? "block" : "none";
+      if (opening && !scanConfigLoaded) {
+        scanConfigLoaded = true;
+        fetch("/scan/categories").then(r => r.json()).then(data => {
+          const categories = data.categories || [];
+          ALL_KNOWN_KEYWORDS = [...new Set(categories.flatMap(c => c.keywords || []))].sort();
+          ALL_KNOWN_CATEGORY_NAMES = [...new Set(categories.map(c => c.name).filter(Boolean))].sort();
+          renderScanCategoryRows(categories);
+        });
+      }
+    }
+
+    function categoryNameFieldHtml(currentName) {
+      const isKnown = ALL_KNOWN_CATEGORY_NAMES.includes(currentName);
+      const options = ALL_KNOWN_CATEGORY_NAMES.map(n => {
+        const safe = n.replace(/"/g, "&quot;");
+        return `<option value="${safe}"${n === currentName ? " selected" : ""}>${safe}</option>`;
+      }).join("");
+      const customSafe = (!isKnown ? currentName : "").replace(/"/g, "&quot;");
+      return `
+        <select class="scan-cat-name-select" onchange="onCategoryNameChange(this)">
+          ${options}
+          <option value="__custom__"${!isKnown ? " selected" : ""}>✏ Custom name...</option>
+        </select>
+        <input type="text" class="scan-cat-name-custom" value="${customSafe}" placeholder="Custom category name"
+          style="display:${isKnown ? "none" : "block"}">`;
+    }
+
+    function onCategoryNameChange(select) {
+      const row = select.closest(".scan-cat-row");
+      row.querySelector(".scan-cat-name-custom").style.display = select.value === "__custom__" ? "block" : "none";
+    }
+
+    function keywordDropdownHtml(rowId, selectedKeywords) {
+      const options = ALL_KNOWN_KEYWORDS.map(kw => {
+        const checked = selectedKeywords.includes(kw) ? " checked" : "";
+        const safe = kw.replace(/"/g, "&quot;");
+        return `<label class="dropdown-option"><input type="checkbox" class="kw-checkbox" value="${safe}"${checked} onchange="updateKwLabel('${rowId}')"> ${safe}</label>`;
+      }).join("");
+      // Any keyword this row already has that isn't in the known pool yet
+      // (e.g. loaded from a previous custom run) still needs its own entry.
+      const extra = selectedKeywords.filter(k => !ALL_KNOWN_KEYWORDS.includes(k)).map(kw => {
+        const safe = kw.replace(/"/g, "&quot;");
+        return `<label class="dropdown-option"><input type="checkbox" class="kw-checkbox" value="${safe}" checked onchange="updateKwLabel('${rowId}')"> ${safe}</label>`;
+      }).join("");
+      return `
+        <div class="dropdown-filter">
+          <button type="button" class="dropdown-toggle" id="${rowId}Btn" onclick="toggleDropdown(event, '${rowId}Panel')">keywords ▾</button>
+          <div class="dropdown-panel" id="${rowId}Panel" style="display:none">
+            ${extra}${options}
+            <div class="dropdown-divider"></div>
+            <div style="display:flex;gap:6px;padding:4px 2px">
+              <input type="text" class="kw-custom-input" placeholder="add custom keyword" style="flex:1;font-size:0.8rem;padding:5px 7px;border-radius:6px;border:1px solid var(--line)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomKeyword('${rowId}',this);}">
+              <button type="button" class="clear-filters-btn" onclick="addCustomKeyword('${rowId}', this.previousElementSibling)">Add</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function addCustomKeyword(rowId, input) {
+      const value = input.value.trim();
+      if (!value) return;
+      const panel = document.getElementById(rowId + "Panel");
+      const existing = Array.from(panel.querySelectorAll(".kw-checkbox")).find(cb => cb.value.toLowerCase() === value.toLowerCase());
+      if (existing) {
+        existing.checked = true;
+      } else {
+        const label = document.createElement("label");
+        label.className = "dropdown-option";
+        label.innerHTML = `<input type="checkbox" class="kw-checkbox" value="${value.replace(/"/g, "&quot;")}" checked onchange="updateKwLabel('${rowId}')"> ${value}`;
+        panel.insertBefore(label, panel.querySelector(".dropdown-divider"));
+      }
+      input.value = "";
+      updateKwLabel(rowId);
+    }
+
+    function updateKwLabel(rowId) {
+      const panel = document.getElementById(rowId + "Panel");
+      const count = panel.querySelectorAll(".kw-checkbox:checked").length;
+      document.getElementById(rowId + "Btn").textContent = (count === 0 ? "No keywords" : count + " keyword" + (count === 1 ? "" : "s")) + " ▾";
+    }
+
+    function scanCategoryRowHtml(cat) {
+      const rowId = "kw" + (scanRowSeq++);
+      const season = cat.season || "all";
+      const html = `
+        <div class="scan-cat-row" data-kw-id="${rowId}">
+          <input type="checkbox" class="scan-cat-include" checked title="Include this category in the next scan">
+          ${categoryNameFieldHtml(cat.name || "")}
+          ${keywordDropdownHtml(rowId, cat.keywords || [])}
+          <select class="scan-cat-season">
+            <option value="all"${season === "all" ? " selected" : ""}>All seasons</option>
+            <option value="winter"${season === "winter" ? " selected" : ""}>Winter</option>
+            <option value="summer"${season === "summer" ? " selected" : ""}>Summer</option>
+          </select>
+          <button type="button" class="scan-cat-remove" onclick="this.closest('.scan-cat-row').remove()" title="Remove">✕</button>
+        </div>`;
+      return { html, rowId };
+    }
+
+    function renderScanCategoryRows(categories) {
+      const built = categories.map(scanCategoryRowHtml);
+      document.getElementById("scanCategoryRows").innerHTML = built.map(b => b.html).join("");
+      built.forEach(b => updateKwLabel(b.rowId));
+    }
+
+    function addScanCategoryRow() {
+      const { html, rowId } = scanCategoryRowHtml({});
+      document.getElementById("scanCategoryRows").insertAdjacentHTML("beforeend", html);
+      updateKwLabel(rowId);
+    }
+
+    function setAllScanCategories(checked) {
+      document.querySelectorAll(".scan-cat-include").forEach(cb => cb.checked = checked);
+    }
+
+    function collectScanCategories() {
+      const categories = [];
+      document.querySelectorAll("#scanCategoryRows .scan-cat-row").forEach(row => {
+        if (!row.querySelector(".scan-cat-include").checked) return;
+        const nameSelect = row.querySelector(".scan-cat-name-select");
+        const name = (nameSelect.value === "__custom__" ? row.querySelector(".scan-cat-name-custom").value : nameSelect.value).trim();
+        const keywords = Array.from(row.querySelectorAll(".kw-checkbox:checked")).map(cb => cb.value);
+        const season = row.querySelector(".scan-cat-season").value;
+        if (!name || keywords.length === 0) return;
+        categories.push({ name, keywords, season });
+      });
+      return categories;
+    }
+
+    function runScan(useCustom) {
       const btn = document.getElementById("runBtn");
+      const customBtn = document.getElementById("runCustomBtn");
       const logBox = document.getElementById("log");
       btn.disabled = true;
+      customBtn.disabled = true;
       logBox.style.display = "block";
       logBox.textContent = "";
 
-      fetch("/scan/run", { method: "POST" })
+      // "Run new scan" always uses scan_categories.json defaults on the
+      // server, regardless of whether the customize panel happens to be
+      // open - only the panel's own "Run with these settings" button
+      // should ever send a custom category list.
+      const body = useCustom ? JSON.stringify({ categories: collectScanCategories() }) : undefined;
+
+      fetch("/scan/run", { method: "POST", headers: { "Content-Type": "application/json" }, body })
         .then(r => r.json())
         .then(r => {
-          if (!r.ok) { setStatus("error", r.message); btn.disabled = false; return; }
+          if (!r.ok) { setStatus("error", r.message); btn.disabled = false; customBtn.disabled = false; return; }
           if (polling) clearInterval(polling);
           polling = setInterval(poll, 1500);
         })
-        .catch(() => { setStatus("error", "Could not reach local server"); btn.disabled = false; });
+        .catch(() => { setStatus("error", "Could not reach local server"); btn.disabled = false; customBtn.disabled = false; });
     }
 
     function poll() {
@@ -646,6 +957,7 @@
           clearInterval(polling);
           polling = null;
           document.getElementById("runBtn").disabled = false;
+          document.getElementById("runCustomBtn").disabled = false;
           if (data.status === "done") location.reload();
         }
       });
@@ -662,6 +974,7 @@
     }
     if (initialStatus === "running") {
       document.getElementById("runBtn").disabled = true;
+      document.getElementById("runCustomBtn").disabled = true;
       if (polling) clearInterval(polling);
       polling = setInterval(poll, 1500);
       poll();

@@ -11,6 +11,7 @@ keyword filter on top of the relevance/seasonal filters, and a verified
 product_url_for() link per product.
 """
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,22 @@ from app.cj_client import (
 )
 from app.db import DBError
 
+CATEGORIES_FILE = Path(__file__).resolve().parent.parent / "scan_categories.json"
+
+
+def _load_default_categories() -> list[dict]:
+    """The scan's default category/keyword/season list - lives in a plain
+    JSON file (not hardcoded here, not an unwieldy single .env line) so it's
+    editable directly, and is the fallback whenever a scan isn't given a
+    custom list from the UI's "customize this scan" form."""
+    if not CATEGORIES_FILE.exists():
+        raise RuntimeError(
+            f"{CATEGORIES_FILE} is missing - this file holds the scan's default "
+            "categories/keywords/seasons and is required to run a scan."
+        )
+    return json.loads(CATEGORIES_FILE.read_text())
+
+
 # Mirthovia-relevant categories. Keywords are PLAIN category terms, not
 # "cute X" / "kawaii X" - CJ product titles rarely contain the aesthetic word
 # AND the category word as one contiguous phrase, so prefixing the search
@@ -34,72 +51,25 @@ from app.db import DBError
 # everything. The aesthetic is enforced separately by is_cute() below, using
 # CUTENESS_KEYWORDS from .env - that's the only place "cute" should be checked.
 #
-CATEGORIES = [
-    {"name": "Hair Accessories", "keywords": ["hair clip", "hair tie", "hair band", "scrunchie"]},
-    {"name": "Phone Accessories", "keywords": ["phone charm", "phone case"]},
-    {"name": "Stationery & Desk", "keywords": ["stationery", "desk organizer"]},
-    {"name": "Keychains & Charms", "keywords": ["keychain", "bag charm"]},
-    # Clothing/jewelry run far more sellers-per-listing industry-wide on CJ
-    # than small accessories do (confirmed live: 0/100 "dress"/"bracelet"/
-    # "necklace" results pass the default 300 cutoff) - a higher threshold
-    # here isn't "letting in more competition," it's the actual realistic
-    # floor for these categories.
-    {"name": "Jewelry", "keywords": ["ring", "earrings", "bracelet", "necklace"], "saturation_threshold": 1500},
-    {"name": "Dresses", "keywords": ["dress"], "saturation_threshold": 1500},
-    # Clothing titles almost never contain an explicit "cute/kawaii/pastel"
-    # word even when the item clearly is (confirmed live: only 1/100
-    # "blouse" results passed the cuteness filter) - style here is visual,
-    # not a title keyword, so this category skips that check.
-    {"name": "Tops & Blouses", "keywords": ["crop top", "blouse"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Skirts", "keywords": ["skirt"], "saturation_threshold": 1500},
-    # CJ's search for a compound phrase like "christmas hair clip" mostly
-    # ignores "christmas" and just returns generic hair clips (confirmed
-    # live: 0/100 titles even contained the word) - search broad festive
-    # terms instead and require the title separately mention an on-brand
-    # accessory type, so results are both genuinely Christmas AND on-brand
-    # (not the random holiday home-decor CJ's search otherwise surfaces).
-    {
-        "name": "Christmas & Festive",
-        "keywords": ["christmas", "santa", "snowman", "snowflake"],
-        "allow_seasonal": True,
-        "must_contain_any": ["hair clip", "hairpin", "earrings", "necklace", "bracelet", "ring", "keychain", "phone case", "charm"],
-    },
-    {"name": "Bags & Purses", "keywords": ["mini bag", "crossbody bag"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Sunglasses", "keywords": ["sunglasses"], "saturation_threshold": 1500},
-    # Real comparables (Shein/Walmart): single-pair novelty socks sell for
-    # $1.50-$5.79, never near $9.99 - the old target was too high across
-    # every product in this category, not just one.
-    {"name": "Socks & Legwear", "keywords": ["socks"], "saturation_threshold": 1500},
-    # Same "clothing titles don't say cute" issue as Tops & Blouses/Bags -
-    # verified live, all four need require_cute off to get real volume.
-    {"name": "Winter Boots & Shoes", "keywords": ["snow boots", "winter boots"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Coats & Jackets", "keywords": ["winter coat", "padded jacket"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Winter Dresses & Tops", "keywords": ["knit dress", "turtleneck"], "saturation_threshold": 1500, "require_cute": False},
-    {"name": "Scarves & Gloves", "keywords": ["scarf", "winter gloves"], "saturation_threshold": 1500, "require_cute": False},
-]
+CATEGORIES = _load_default_categories()
 
-TOP_PER_CATEGORY = 10
-TOP_OVERALL = 30
+# Tunable scan numbers - from .env, not hardcoded, so they can be changed
+# without touching code. Defaults match what this app has used throughout.
+TOP_PER_CATEGORY = int(os.getenv("SCAN_TOP_PER_CATEGORY", "10"))
+TOP_OVERALL = int(os.getenv("SCAN_TOP_OVERALL", "30"))
 
-# Category -> season, for the dashboard's season filter - not a separate
-# scan, just a lookup by the category name already stored on every product.
-CATEGORY_SEASON = {
-    "Sweaters & Cardigans": "winter",
-    "Socks & Legwear": "winter",
-    "Christmas & Festive": "winter",
-    "Winter Boots & Shoes": "winter",
-    "Coats & Jackets": "winter",
-    "Winter Dresses & Tops": "winter",
-    "Scarves & Gloves": "winter",
-    "Dresses": "summer",
-    "Skirts": "summer",
-    "Sunglasses": "summer",
-}
+# Floor price = cost * this multiplier (e.g. 1.5 = a 50% markup on cost) -
+# explicitly NOT a market suggestion, just a "never price below this" floor.
+PRICE_MARKUP_MULTIPLIER = float(os.getenv("PRICE_MARKUP_MULTIPLIER", "1.5"))
+
+# name -> season, built from the loaded categories' own "season" field, as
+# a fallback for older saved products that predate a product carrying its
+# own "season" field directly (see _score_product).
+_CATEGORY_SEASON_BY_NAME = {c["name"]: c.get("season", "all") for c in CATEGORIES}
 
 
 def season_for_category(category: str) -> str:
-    return CATEGORY_SEASON.get(category, "all")
+    return _CATEGORY_SEASON_BY_NAME.get(category, "all")
 
 # listedNum = how many other sellers already carry this exact product on CJ.
 # A real test found a product listed by 7,673 sellers - that's not "proven
@@ -107,15 +77,21 @@ def season_for_category(category: str) -> str:
 # SATURATED_THRESHOLD gets excluded before we even spend a scoring API call
 # on it, and the remaining competition level is shown on every product so
 # you can judge it yourself rather than finding out after the fact.
-SATURATED_THRESHOLD = 300
+SATURATED_THRESHOLD = int(os.getenv("SCAN_SATURATED_THRESHOLD", "300"))
 
 
-def competition_label(listed_num: int) -> str:
-    if listed_num < 15:
+def competition_label(listed_num: int, threshold: int = SATURATED_THRESHOLD) -> str:
+    # Bands scale with the category's own inclusion threshold, not a fixed
+    # 300 - a category like winter coats/boots raises its threshold to 1500
+    # because generic apparel always has far more sellers than a niche
+    # accessory on CJ, and without this every single result in that
+    # category would read as "Saturated" even though, relative to what's
+    # normal for that category, some are much fresher than others.
+    if listed_num < threshold * 0.05:
         return "Fresh"
-    if listed_num < 60:
+    if listed_num < threshold * 0.2:
         return "Growing"
-    if listed_num < SATURATED_THRESHOLD:
+    if listed_num < threshold:
         return "Established"
     return "Saturated"
 
@@ -130,13 +106,32 @@ def _has_word(text: str, word: str) -> bool:
 
 
 def is_relevant(name: str, keyword: str) -> bool:
-    # Require every word of the keyword to appear somewhere in the name (not
-    # necessarily contiguous/in order) - a strict exact-phrase match was
-    # rejecting nearly all real CJ titles, which rarely repeat a multi-word
-    # search term verbatim (e.g. "Pearl Flower Hair Clip" doesn't contain the
-    # literal substring "hair claw clip" even though it's clearly relevant).
+    # Require every word of the keyword to appear in the name, close enough
+    # together that they're plausibly describing the same thing - not just
+    # present ANYWHERE in the title. A plain "all words present anywhere"
+    # check let "Usb Bag Sealer ... Mini Bag Sealer For Plastic Bags" (a
+    # kitchen gadget) pass as relevant to "mini bag", since "mini" and "bag"
+    # both occur, just far apart - which can crowd real bags out of the
+    # top-10 ranking. A strict exact-phrase match is still too strict
+    # though (e.g. "Pearl Flower Hair Clip" doesn't contain the literal
+    # substring "hair claw clip" even though it's clearly relevant), so
+    # this allows the keyword's words to be spread across a small window
+    # (their own count + 2 slack words) instead of either extreme.
     lname = (name or "").lower()
-    return all(_has_word(lname, word) for word in keyword.strip().lower().split())
+    words = keyword.strip().lower().split()
+    tokens = re.findall(r"[a-z0-9']+", lname)
+
+    positions = []
+    for word in words:
+        pattern = re.compile(r"^" + re.escape(word) + r"(?:es|s)?$")
+        candidates = [i for i, tok in enumerate(tokens) if pattern.match(tok) and i not in positions]
+        if not candidates:
+            return False
+        # pick whichever occurrence keeps the overall span tightest so far
+        best = min(candidates, key=lambda i: i if not positions else abs(i - positions[-1]))
+        positions.append(best)
+
+    return max(positions) - min(positions) <= len(words) + 6
 
 
 def is_cute(name: str, cuteness_keywords: list[str]) -> bool:
@@ -151,7 +146,13 @@ def is_cute(name: str, cuteness_keywords: list[str]) -> bool:
 # own, so these words hard-disqualify a product regardless of what else
 # matched (e.g. "Sexy Slim Oblique Shoulder Skirt" matched a cuteness keyword
 # but is clearly off-brand for Mirthovia).
-OFF_BRAND_KEYWORDS = ["sexy", "lingerie", "bodycon", "see-through", "sheer", "fetish", "erotic"]
+OFF_BRAND_KEYWORDS = [
+    "sexy", "lingerie", "bodycon", "see-through", "sheer", "fetish", "erotic",
+    # Mirthovia is a girls'/women's cute-aesthetic shop - "men"/"man" is a
+    # whole-word match (see _has_word) so it won't false-positive on
+    # "women"/"woman", which both have a word character right before "man".
+    "men", "man", "boys", "boy",
+]
 
 
 def is_off_brand(name: str) -> bool:
@@ -177,6 +178,8 @@ def _score_product(
     category_name: str,
     destination_countries: list[str],
     log,
+    saturation_threshold: int = SATURATED_THRESHOLD,
+    season: str = "all",
 ) -> dict | None:
     pid = p.get("id")
     name = p.get("nameEn") or ""
@@ -208,11 +211,12 @@ def _score_product(
     # producing unrealistic suggestions - a plain 50% markup on THIS item's
     # own cost scales naturally instead: cheap items suggest cheap, pricier
     # items suggest more, never the same number for everything.
-    retail = round(cost * 1.5, 2)
-    retail_source = "floor price, 50% markup on cost - not a market suggestion"
+    retail = round(cost * PRICE_MARKUP_MULTIPLIER, 2)
+    markup_pct = round((PRICE_MARKUP_MULTIPLIER - 1) * 100)
+    retail_source = f"floor price, {markup_pct}% markup on cost - not a market suggestion"
 
     listed_num = int(p.get("listedNum") or 0)
-    competition = competition_label(listed_num)
+    competition = competition_label(listed_num, saturation_threshold)
     is_saturated = competition == "Saturated"
 
     for country, v in per_country.items():
@@ -235,6 +239,7 @@ def _score_product(
         "vid": vid,
         "name": name,
         "category": category_name,
+        "season": season,
         "image": p.get("bigImage"),
         "has_video": bool(p.get("isVideo")),
         "product_url": product_url_for(pid, name),
@@ -262,7 +267,12 @@ def run_scan(
     cuteness_keywords: list[str],
     destination_countries: list[str],
     log=print,
+    categories: list[dict] | None = None,
 ) -> dict:
+    cats_to_scan = categories if categories is not None else CATEGORIES
+    run_id = datetime.now(timezone.utc).isoformat()
+    run_started_at = run_id
+    run_categories_out = []  # full, untrimmed per-category results for this run
     categories_out = []
     all_products = []
     backup_file = Path(__file__).resolve().parent.parent / "data" / "last_scan_backup.json"
@@ -279,7 +289,7 @@ def run_scan(
         raise DBError(f"Can't reach the database - aborting before wasting API calls: {e}") from e
     old_categories_by_name = {c["name"]: c for c in old_scan.get("categories", [])}
 
-    for cat in CATEGORIES:
+    for cat in cats_to_scan:
         log(f"=== {cat['name']} ===")
         seen_ids = set()
         merged = []
@@ -305,6 +315,25 @@ def run_scan(
                 and (not must_contain_any or any(_has_word((p.get("nameEn") or "").lower(), w) for w in must_contain_any))
             ]
             log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+off-brand+relevance+cuteness+competition filters")
+            # Only ~per_keyword_limit of these actually get scored (CJ's
+            # rate limit makes scoring every match too slow) - log every
+            # filtered-passing candidate anyway, scored or not, so a good
+            # product that didn't make the cut isn't just gone. Same log
+            # the dashboard's search box writes to, so both paths feed one
+            # "found but not added" view.
+            try:
+                db.log_search_results(kw, [
+                    {
+                        "pid": str(p.get("id")),
+                        "name": p.get("nameEn"),
+                        "image": p.get("bigImage"),
+                        "cost": p.get("sellPrice"),
+                        "listed_num": p.get("listedNum"),
+                    }
+                    for p in filtered
+                ])
+            except DBError as e:
+                log(f"  [warn] couldn't log search results for '{kw}': {e}")
             # Prefer products not already captured in a past scan/fetch, so
             # a daily re-scan surfaces new finds instead of the same top
             # results every time; within that, same demand-sweet-spot sort
@@ -329,7 +358,11 @@ def run_scan(
         log(f"  scoring {len(merged)} candidates (variant + shipping lookups, ~1/sec)...")
         enriched = []
         for p in merged:
-            scored = _score_product(client, p, cat["name"], destination_countries, log)
+            scored = _score_product(
+                client, p, cat["name"], destination_countries, log,
+                saturation_threshold=cat.get("saturation_threshold", SATURATED_THRESHOLD),
+                season=cat.get("season") or season_for_category(cat["name"]),
+            )
             if scored:
                 enriched.append(scored)
                 log(
@@ -345,6 +378,16 @@ def run_scan(
                     log(f"    [warn] couldn't save {scored['name'][:40]} to the database: {e}")
 
         enriched.sort(key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))
+        run_categories_out.append({"name": cat["name"], "products": enriched})
+        try:
+            db.save_scan_run(run_id, {
+                "started_at": run_started_at,
+                "finished_at": None,
+                "categories": run_categories_out,
+            })
+        except DBError as e:
+            log(f"  [warn] couldn't save this run's history for {cat['name']}: {e}")
+
         top = enriched[:TOP_PER_CATEGORY]
         if top:
             categories_out.append({"name": cat["name"], "products": top})
@@ -421,6 +464,16 @@ def run_scan(
         )
 
     backup_file.unlink(missing_ok=True)  # saved for real - the local copy was just insurance
+
+    try:
+        db.save_scan_run(run_id, {
+            "started_at": run_started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "categories": run_categories_out,
+        })
+    except DBError as e:
+        log(f"  [warn] couldn't mark this run's history as finished: {e}")
+
     return result
 
 
