@@ -72,7 +72,10 @@ CATEGORIES = [
     {"name": "Bags & Purses", "keywords": ["mini bag", "crossbody bag"], "target_retail": 15.99, "saturation_threshold": 1500, "require_cute": False},
     {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
     {"name": "Sunglasses", "keywords": ["sunglasses"], "target_retail": 12.99, "saturation_threshold": 1500},
-    {"name": "Socks & Legwear", "keywords": ["socks"], "target_retail": 9.99, "saturation_threshold": 1500},
+    # Real comparables (Shein/Walmart): single-pair novelty socks sell for
+    # $1.50-$5.79, never near $9.99 - the old target was too high across
+    # every product in this category, not just one.
+    {"name": "Socks & Legwear", "keywords": ["socks"], "target_retail": 5.99, "saturation_threshold": 1500},
     # Same "clothing titles don't say cute" issue as Tops & Blouses/Bags -
     # verified live, all four need require_cute off to get real volume.
     {"name": "Winter Boots & Shoes", "keywords": ["snow boots", "winter boots"], "target_retail": 29.99, "saturation_threshold": 1500, "require_cute": False},
