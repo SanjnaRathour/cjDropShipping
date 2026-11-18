@@ -209,7 +209,7 @@ def _score_product(
     # own cost scales naturally instead: cheap items suggest cheap, pricier
     # items suggest more, never the same number for everything.
     retail = round(cost * 1.5, 2)
-    retail_source = "50% markup on cost"
+    retail_source = "floor price, 50% markup on cost - not a market suggestion"
 
     listed_num = int(p.get("listedNum") or 0)
     competition = competition_label(listed_num)
