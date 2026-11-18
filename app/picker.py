@@ -285,6 +285,8 @@ def run_scan(
 ) -> dict:
     categories_out = []
     all_products = []
+    backup_file = Path(__file__).resolve().parent.parent / "data" / "last_scan_backup.json"
+    backup_file.parent.mkdir(exist_ok=True)
 
     # Check the database BEFORE spending 20-40 minutes on rate-limited CJ
     # calls across every category - a scan that can't save its result at
@@ -292,8 +294,10 @@ def run_scan(
     # not after all the real work is already done and thrown away.
     try:
         known_pids = {str(p["pid"]) for p in db.get_all_products()}
+        old_scan = db.get_last_scan() or {}
     except DBError as e:
         raise DBError(f"Can't reach the database - aborting before wasting API calls: {e}") from e
+    old_categories_by_name = {c["name"]: c for c in old_scan.get("categories", [])}
 
     for cat in CATEGORIES:
         log(f"=== {cat['name']} ===")
@@ -352,26 +356,60 @@ def run_scan(
                     f"    OK: {scored['name'][:50]:<50} cost=${scored['cost']:.2f} "
                     f"worst-case margin={scored['worst_case_margin_pct']}%"
                 )
+                # Save the moment each product is scored, not batched at the
+                # end - a crash/rate-limit later in the scan no longer
+                # throws away everything already found.
+                try:
+                    db.upsert_product(scored["pid"], scored, source="scan")
+                except DBError as e:
+                    log(f"    [warn] couldn't save {scored['name'][:40]} to the database: {e}")
 
         enriched.sort(key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))
         top = enriched[:TOP_PER_CATEGORY]
-        categories_out.append({"name": cat["name"], "products": top})
-        all_products.extend(top)
+        if top:
+            categories_out.append({"name": cat["name"], "products": top})
+            all_products.extend(top)
+        else:
+            # Nothing passed for this category this run - could be a real
+            # "nothing out there" or just CJ's search being flaky for this
+            # one keyword. Keep last run's results for THIS category
+            # instead of blanking it out on the dashboard.
+            old_cat = old_categories_by_name.get(cat["name"])
+            if old_cat:
+                log(f"  [warn] 0 products found for {cat['name']} this run - keeping previous results for it")
+                categories_out.append(old_cat)
+                all_products.extend(old_cat["products"])
+            else:
+                log(f"  [warn] 0 products found for {cat['name']} this run (no previous results to fall back to)")
+
+        # Save progress after every category too, so the dashboard reflects
+        # this scan incrementally instead of waiting for all N categories.
+        partial_result = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "categories": categories_out + [
+                c for name, c in old_categories_by_name.items()
+                if name not in {x["name"] for x in categories_out}
+            ],
+            "top_overall": sorted(all_products, key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))[:TOP_OVERALL],
+        }
+        backup_file.write_text(json.dumps(partial_result))
+        try:
+            db.save_last_scan(partial_result)
+        except DBError as e:
+            log(f"  [warn] couldn't save scan progress after {cat['name']}: {e}")
 
     all_products.sort(key=lambda r: (-r["worst_case_margin_pct"], r["listed_num"]))
 
     if not all_products:
-        # Zero products across every category almost always means CJ's
-        # search endpoint itself is rate-limited/down for now (confirmed by
-        # testing: other endpoints like product detail still worked fine
-        # while search returned 0 for every keyword) - NOT a real "nothing
-        # found" result. Raise instead of silently overwriting good cached
-        # results from a previous successful scan with an empty one.
+        # Every category came back empty AND had no previous results to
+        # fall back on - almost always means CJ's search endpoint itself is
+        # rate-limited/down right now (confirmed by testing: other
+        # endpoints like product detail still worked fine while search
+        # returned 0 for every keyword), not that nothing matched.
         raise CJAPIError(
-            "Scan found 0 products in every category - this almost always means CJ's "
-            "search endpoint is rate-limited right now (check if other calls like "
-            "product detail still work), not that nothing matched. Previous scan "
-            "results were kept, not overwritten. Try again later."
+            "Scan found 0 products in every category, with no previous results to fall "
+            "back on either - this almost always means CJ's search endpoint is "
+            "rate-limited right now, not that nothing matched. Try again later."
         )
 
     result = {
@@ -380,31 +418,26 @@ def run_scan(
         "top_overall": all_products[:TOP_OVERALL],
     }
 
-    # 20-40 minutes of rate-limited CJ calls just produced this - write it
-    # to disk BEFORE touching Mongo, so a save failure (even a transient
-    # one, like Atlas still propagating a new IP allowlist entry) never
-    # throws away completed work. Retry the real save a couple times
-    # before giving up, since that kind of failure is often transient.
-    backup_file = Path(__file__).resolve().parent.parent / "data" / "last_scan_backup.json"
-    backup_file.parent.mkdir(exist_ok=True)
-    backup_file.write_text(json.dumps(result))
-
+    # Already saved incrementally after every category above - this final
+    # save just makes sure the very last state (fully sorted) is what
+    # sticks, with a couple of retries since a save failure here is often
+    # transient (e.g. Atlas still propagating a new IP allowlist entry).
     last_err = None
     for attempt in range(3):
         try:
             db.save_last_scan(result)
-            for p in all_products:
-                db.upsert_product(p["pid"], p, source="scan")
             break
         except DBError as e:
             last_err = e
-            log(f"  [warn] DB save failed (attempt {attempt + 1}/3): {e}")
+            log(f"  [warn] final save failed (attempt {attempt + 1}/3): {e}")
             time.sleep(5)
     else:
         raise DBError(
-            f"Scan finished but couldn't save to the database after 3 tries: {last_err}. "
-            f"The result was NOT lost - it's saved locally at {backup_file}, retry the save "
-            f"once the database is reachable again instead of re-running the whole scan."
+            f"Scan finished but the final save failed after 3 tries: {last_err}. "
+            f"Every category was already saved as it completed, so nothing found "
+            f"is actually lost - the last category's result is backed up locally at "
+            f"{backup_file}; run scripts/recover_scan_backup.py once the database is "
+            f"reachable again instead of re-running the whole scan."
         )
 
     backup_file.unlink(missing_ok=True)  # saved for real - the local copy was just insurance

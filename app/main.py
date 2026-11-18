@@ -250,6 +250,18 @@ def dashboard(request: Request):
         error = SCAN_STATE["error"]
         logs = list(SCAN_STATE["logs"][-200:])
 
+    # SCAN_STATE["data"] is only ever set once at server startup (from
+    # load_last_scan()) or when a scan finishes - if MongoDB happened to be
+    # briefly unreachable at that exact startup moment (confirmed this
+    # happens, e.g. an Atlas SSL handshake hiccup), data stays None forever
+    # and the dashboard shows "No scan results yet" even though real data
+    # is sitting in Mongo. Retry the load here instead of only once ever.
+    if data is None and status != "running":
+        data = load_last_scan()
+        if data is not None:
+            with SCAN_LOCK:
+                SCAN_STATE["data"] = data
+
     all_products = []
     categories_present = []
     generated_at = None
