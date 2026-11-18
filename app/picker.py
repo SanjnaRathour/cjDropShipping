@@ -73,6 +73,12 @@ CATEGORIES = [
     {"name": "Sweaters & Cardigans", "keywords": ["sweater", "cardigan"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
     {"name": "Sunglasses", "keywords": ["sunglasses"], "target_retail": 12.99, "saturation_threshold": 1500},
     {"name": "Socks & Legwear", "keywords": ["socks"], "target_retail": 9.99, "saturation_threshold": 1500},
+    # Same "clothing titles don't say cute" issue as Tops & Blouses/Bags -
+    # verified live, all four need require_cute off to get real volume.
+    {"name": "Winter Boots & Shoes", "keywords": ["snow boots", "winter boots"], "target_retail": 29.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Coats & Jackets", "keywords": ["winter coat", "padded jacket"], "target_retail": 34.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Winter Dresses & Tops", "keywords": ["knit dress", "turtleneck"], "target_retail": 24.99, "saturation_threshold": 1500, "require_cute": False},
+    {"name": "Scarves & Gloves", "keywords": ["scarf", "winter gloves"], "target_retail": 11.99, "saturation_threshold": 1500, "require_cute": False},
 ]
 
 TOP_PER_CATEGORY = 10
@@ -84,6 +90,10 @@ CATEGORY_SEASON = {
     "Sweaters & Cardigans": "winter",
     "Socks & Legwear": "winter",
     "Christmas & Festive": "winter",
+    "Winter Boots & Shoes": "winter",
+    "Coats & Jackets": "winter",
+    "Winter Dresses & Tops": "winter",
+    "Scarves & Gloves": "winter",
     "Dresses": "summer",
     "Skirts": "summer",
     "Sunglasses": "summer",
