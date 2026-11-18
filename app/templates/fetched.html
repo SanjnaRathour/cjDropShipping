@@ -14,7 +14,8 @@
     h1 { font-size: 1.2rem; margin: 10px 0 16px; }
     .empty { color: var(--muted); padding: 16px 0; font-size: 0.9rem; }
 
-    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .table-scroll { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; min-width: 560px; border-collapse: collapse; background: #fff; }
     th, td { text-align: left; padding: 10px 12px; font-size: 0.82rem; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { background: #faf7f3; font-size: 0.68rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; }
     tr:last-child td { border-bottom: none; }
@@ -37,6 +38,7 @@
       <p class="empty">Nothing fetched by link yet — paste a CJ product URL on the dashboard to get started.</p>
     {% else %}
       <input type="text" class="search-box" id="searchBox" placeholder="Search by product name, link, or ID..." oninput="applySearch()">
+      <div class="table-scroll">
       <table id="fetchTable">
         <thead>
           <tr>
@@ -50,8 +52,12 @@
           {% for e in entries %}
           <tr data-search="{{ ((e.name or '') ~ ' ' ~ e.link ~ ' ' ~ (e.pid or '')) | lower }}">
             <td>
-              {% if e.name %}{{ e.name }}{% else %}<span class="link-text">{{ e.link }}</span>{% endif %}
-              <div class="link-text">{{ e.link }}</div>
+              {% if e.name %}
+                {{ e.name }}
+                <div class="link-text">{{ e.link }}</div>
+              {% else %}
+                <div class="link-text">{{ e.link }}</div>
+              {% endif %}
               {% if e.status == "error" %}<div class="err-msg">{{ e.error }}</div>{% endif %}
             </td>
             <td>
@@ -73,6 +79,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <p class="empty" id="noMatches" style="display:none">No products match your search.</p>
     {% endif %}
   </div>

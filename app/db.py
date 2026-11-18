@@ -58,6 +58,24 @@ def mark_posted(pid: str, name: str, platform: str):
     )
 
 
+def mark_added_to_store(pid: str, name: str):
+    db = get_db()
+    db.posted_products.update_one(
+        {"_id": str(pid)},
+        {"$set": {"name": name, "added_to_store": datetime.now().isoformat()}},
+        upsert=True,
+    )
+
+
+def set_rejected(pid: str, name: str, rejected: bool):
+    db = get_db()
+    db.posted_products.update_one(
+        {"_id": str(pid)},
+        {"$set": {"name": name, "rejected": datetime.now().isoformat() if rejected else None}},
+        upsert=True,
+    )
+
+
 # --- products: one deduplicated history per pid, across scan + manual fetch -
 
 def upsert_product(pid: str, snapshot: dict, source: str) -> dict:
@@ -104,6 +122,13 @@ def get_product_history(pid: str) -> dict | None:
 
 def get_all_products() -> list:
     return [d["latest"] for d in get_db().products.find()]
+
+
+def get_first_seen_dates() -> dict:
+    """pid -> first_seen_at, so the dashboard can show which scan run first
+    turned up a given product instead of just one blanket 'last scan' date."""
+    docs = get_db().products.find({}, {"first_seen_at": 1})
+    return {d["_id"]: d["first_seen_at"] for d in docs}
 
 
 # --- fetch-by-link history ---------------------------------------------------

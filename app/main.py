@@ -122,6 +122,14 @@ def _mark_posted(pid: str, name: str, platform: str):
     db.mark_posted(pid, name, platform)
 
 
+def _mark_added_to_store(pid: str, name: str):
+    db.mark_added_to_store(pid, name)
+
+
+def _set_rejected(pid: str, name: str, rejected: bool):
+    db.set_rejected(pid, name, rejected)
+
+
 _client: CJClient | None = None
 
 
@@ -266,13 +274,21 @@ def dashboard(request: Request):
     generated_at = None
     if data:
         posted = _load_posted()
+        try:
+            first_seen_dates = db.get_first_seen_dates()
+        except DBError:
+            first_seen_dates = {}
 
         def _enrich(p):
             p = _with_inr(p, USD_TO_INR)
-            platforms = posted.get(str(p["pid"]), {}).get("platforms", {})
+            entry = posted.get(str(p["pid"]), {})
+            platforms = entry.get("platforms", {})
             p["posted_instagram"] = platforms.get("instagram")
             p["posted_pinterest"] = platforms.get("pinterest")
+            p["added_to_store"] = entry.get("added_to_store")
+            p["rejected"] = entry.get("rejected")
             p["season"] = season_for_category(p["category"])
+            p["found_at"] = first_seen_dates.get(str(p["pid"]))
             return p
 
         generated_at = data.get("generated_at")
@@ -292,6 +308,11 @@ def dashboard(request: Request):
                 all_products.append(_enrich(p))
 
         categories_present = sorted({p["category"] for p in all_products})
+        scan_dates_present = sorted(
+            {p["found_at"][:10] for p in all_products if p.get("found_at")}, reverse=True
+        )
+    else:
+        scan_dates_present = []
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -299,6 +320,7 @@ def dashboard(request: Request):
             "request": request,
             "generated_at": generated_at,
             "all_products": all_products,
+            "scan_dates_present": scan_dates_present,
             "categories_present": categories_present,
             "status": status,
             "error": error,
@@ -315,6 +337,24 @@ def mark_posted(pid: str, name: str = Form(...), platform: str = Form(...), redi
         _mark_posted(pid, name, platform)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    except DBError as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+    return RedirectResponse(redirect_to, status_code=303)
+
+
+@app.post("/added-to-store/{pid}")
+def added_to_store(pid: str, name: str = Form(...), redirect_to: str = Form("/")):
+    try:
+        _mark_added_to_store(pid, name)
+    except DBError as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+    return RedirectResponse(redirect_to, status_code=303)
+
+
+@app.post("/reject/{pid}")
+def reject_product(pid: str, name: str = Form(...), rejected: str = Form("true"), redirect_to: str = Form("/")):
+    try:
+        _set_rejected(pid, name, rejected == "true")
     except DBError as e:
         return JSONResponse({"error": str(e)}, status_code=503)
     return RedirectResponse(redirect_to, status_code=303)
@@ -608,9 +648,12 @@ def product_detail(request: Request, pid: str):
 
     product = _with_inr(product, USD_TO_INR)
     posted = _load_posted()
-    platforms = posted.get(str(product["pid"]), {}).get("platforms", {})
+    posted_entry = posted.get(str(product["pid"]), {})
+    platforms = posted_entry.get("platforms", {})
     product["posted_instagram"] = platforms.get("instagram")
     product["posted_pinterest"] = platforms.get("pinterest")
+    product["added_to_store"] = posted_entry.get("added_to_store")
+    product["rejected"] = posted_entry.get("rejected")
 
     images, video_url, media_error = _fetch_media(pid, product.get("image"))
     image_checks = _cached_image_checks(pid, images)

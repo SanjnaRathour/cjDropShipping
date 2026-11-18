@@ -15,8 +15,8 @@
     .cat-tag { font-size: 0.68rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; }
     .error-box { background: #fff0f0; border: 1px solid #f3c6c6; border-radius: 10px; padding: 14px; color: #8a2a2a; margin-bottom: 16px; font-size: 0.88rem; }
 
-    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 16px; }
-    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; margin-top: 16px; }
+    @media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
     .panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
     .panel h2 { font-size: 0.85rem; margin: 0 0 10px; color: #6b5a55; }
@@ -51,7 +51,7 @@
     .variant-price .inr { display: block; font-size: 0.65rem; font-weight: 500; color: var(--muted); text-align: right; }
     .bundle-tag { font-size: 0.62rem; background: #faf0dd; color: #8a5a10; border-radius: 999px; padding: 1px 6px; }
 
-    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+    .stats { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 14px; }
     .stat .label { font-size: 0.62rem; text-transform: uppercase; color: var(--muted); }
     .stat .value { font-size: 0.95rem; font-weight: 700; }
     .stat .inr { display: block; font-size: 0.7rem; font-weight: 500; color: var(--muted); }
@@ -108,7 +108,27 @@
             <button type="submit">Mark posted on Pinterest</button>
           </form>
         {% endif %}
+        {% if product.added_to_store %}
+          <span class="posted-badge">🏪 Added to store {{ product.added_to_store[:10] }}</span>
+        {% else %}
+          <form method="post" action="/added-to-store/{{ product.pid }}" style="display:inline">
+            <input type="hidden" name="name" value="{{ product.name }}">
+            <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
+            <button type="submit">🏪 Mark added to store</button>
+          </form>
+        {% endif %}
+        <form method="post" action="/reject/{{ product.pid }}" style="display:inline">
+          <input type="hidden" name="name" value="{{ product.name }}">
+          <input type="hidden" name="rejected" value="{{ 'false' if product.rejected else 'true' }}">
+          <input type="hidden" name="redirect_to" value="/product/{{ product.pid }}">
+          <button type="submit" style="{{ 'color:var(--bad);border-color:var(--bad)' if not product.rejected else '' }}">
+            {{ '↺ Un-reject' if product.rejected else '✗ Reject (not for me)' }}
+          </button>
+        </form>
       </div>
+      {% if product.rejected %}
+        <div class="error-box" style="margin-top:-6px">Rejected on {{ product.rejected[:10] }} — hidden from the dashboard by default. Click "Un-reject" above to bring it back.</div>
+      {% endif %}
 
       <div class="layout">
         <div>

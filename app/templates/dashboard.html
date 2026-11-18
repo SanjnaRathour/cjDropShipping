@@ -7,7 +7,7 @@
     :root { --coral: #FF8FA3; --ink: #3a2e2e; --muted: #9a8c88; --line: #ece4de; --good: #2a9d6f; }
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", sans-serif; background: #fdfaf7; color: var(--ink); margin: 0; padding: 28px 16px 60px; }
-    .wrap { max-width: 1080px; margin: 0 auto; }
+    .wrap { max-width: 1240px; margin: 0 auto; }
     a { color: inherit; }
     h1 { font-size: 1.3rem; margin: 0 0 4px; font-weight: 700; }
     h2.section { font-size: 0.95rem; margin: 28px 0 10px; font-weight: 700; color: #6b5a55; }
@@ -27,15 +27,27 @@
     .notice { border: 1px solid var(--line); border-left: 3px solid var(--coral); border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; color: #6b5a55; margin-bottom: 18px; }
     .empty { color: var(--muted); padding: 16px 0; font-size: 0.9rem; }
 
-    .filter-label { font-size: 0.68rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; margin: 10px 0 6px; }
-    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-    .filter-btn { font-size: 0.78rem; font-weight: 700; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
-    .filter-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .filter-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 14px; }
+    .dropdown-filter { position: relative; display: inline-block; }
+    .dropdown-toggle { font-size: 0.78rem; font-weight: 700; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+    .dropdown-toggle:hover { border-color: var(--coral); }
+    .dropdown-toggle.filtered { border-color: var(--coral); color: var(--coral); }
+    .clear-filters-btn { font-size: 0.78rem; font-weight: 700; padding: 7px 14px; border-radius: 999px; border: 1px dashed var(--line); background: none; color: var(--muted); cursor: pointer; }
+    .clear-filters-btn:hover { border-color: var(--coral); color: var(--coral); }
+    #toTopBtn {
+      display: none; position: fixed; right: 18px; bottom: 18px; z-index: 9;
+      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line);
+      background: var(--ink); color: #fff; font-size: 1.1rem; cursor: pointer;
+      align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(58,46,46,0.25);
+    }
+    #toTopBtn:hover { background: var(--coral); }
+    .dropdown-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 10; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 240px; max-height: 300px; overflow-y: auto; box-shadow: 0 6px 18px rgba(58,46,46,0.12); }
+    .dropdown-actions { display: flex; gap: 10px; padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .dropdown-actions a { font-size: 0.74rem; font-weight: 700; text-decoration: none; }
+    .dropdown-option { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; padding: 5px 2px; cursor: pointer; }
+    .dropdown-option:hover { color: var(--coral); }
 
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, 190px); gap: 12px; }
-    .card { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; transition: border-color 0.15s; }
-    .card:hover { border-color: var(--coral); }
-    .card-select { position: absolute; top: 8px; left: 8px; width: 18px; height: 18px; z-index: 2; cursor: pointer; }
+    .card-select { width: 16px; height: 16px; cursor: pointer; }
 
     .selection-bar {
       position: fixed; bottom: 0; left: 0; right: 0; background: var(--ink); color: #fff;
@@ -45,32 +57,69 @@
     .selection-bar select { padding: 6px 8px; border-radius: 6px; border: none; font-size: 0.8rem; }
     .selection-bar button { background: var(--coral); color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-weight: 700; cursor: pointer; font-size: 0.8rem; }
     .selection-bar .clear-btn { background: none; color: #fff; border: 1px solid #fff5; cursor: pointer; padding: 7px 10px; border-radius: 6px; font-size: 0.78rem; }
-    .card-img-wrap { width: 100%; height: 160px; background: #f3f0ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    .card-img-wrap img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
-    .card-body { padding: 10px 12px; }
+
+    .products-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 860px) { .products-grid { grid-template-columns: 1fr; } }
+    .product-row { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 0; }
+    .product-row:hover { border-color: var(--coral); }
+    .col-select { flex: 0 0 auto; }
+    .col-img { flex: 0 0 auto; }
+    .row-img-wrap { width: 140px; height: 140px; border-radius: 8px; background: #f3f0ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .row-img-wrap img { max-width: 100%; max-height: 100%; object-fit: cover; display: block; }
+    .col-name { flex: 1; min-width: 0; }
     .cat-tag { font-size: 0.6rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; }
-    .product-name { font-size: 0.82rem; font-weight: 600; margin: 2px 0 6px; line-height: 1.3; min-height: 2.1em; }
-    .card-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; }
-    .margin-chip { color: var(--good); font-weight: 700; }
-    .competition-chip { font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+    .row-name { display: block; font-size: 0.82rem; font-weight: 600; margin: 2px 0 4px; line-height: 1.3; text-decoration: none; overflow-wrap: break-word; }
+    .row-name:hover { color: var(--coral); }
+    .found-date { font-size: 0.68rem; color: var(--muted); }
+    .col-margin { flex: 0 0 auto; white-space: nowrap; text-align: center; }
+    .margin-chip { display: block; color: var(--good); font-weight: 700; font-size: 0.8rem; }
+    .competition-chip { display: inline-block; margin-top: 4px; font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
     .competition-fresh { background: #e3fcef; color: #0a7a46; }
     .competition-growing { background: #eef2ff; color: #3b4fb8; }
     .competition-established { background: #fff3cd; color: #8a6d00; }
     .competition-saturated { background: #ffe3e3; color: #a32020; }
-    .card-footer { padding: 0 12px 10px; display: flex; gap: 6px; align-items: center; }
-    .card-footer form { flex: 1; }
-    .view-btn { flex: 1; text-align: center; font-size: 0.7rem; font-weight: 700; padding: 6px; border-radius: 6px; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: #fff; }
-    .view-btn:hover { border-color: var(--coral); color: var(--coral); }
-    .posted-chip { flex: 1; text-align: center; color: var(--good); font-size: 0.72rem; font-weight: 600; }
-    .mark-posted-btn { width: 100%; background: none; border: 1px dashed var(--line); color: var(--muted); border-radius: 6px; padding: 6px; font-size: 0.7rem; font-weight: 600; cursor: pointer; }
-    .mark-posted-btn:hover { border-color: var(--coral); color: var(--coral); }
+    .col-status { flex: 0 0 auto; white-space: nowrap; }
+    .posted-chip { display: block; color: var(--muted); font-size: 0.72rem; font-weight: 600; }
+    .posted-chip.active { color: var(--good); }
+    .col-actions { flex: 0 0 auto; }
+    .row-menu { position: relative; }
+    .kebab-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 1rem; font-weight: 700; line-height: 1; cursor: pointer; }
+    .kebab-btn:hover { border-color: var(--coral); color: var(--coral); }
+    .row-menu-panel { min-width: 180px; padding: 6px; }
+    .row-menu-panel .dropdown-option { padding: 7px 8px; text-decoration: none; color: var(--ink); border-radius: 6px; }
+    .row-menu-panel .dropdown-option:hover { background: #faf7f3; color: var(--coral); }
+    .row-menu-panel form { margin: 0; }
+    .dropdown-option-btn { display: block; width: 100%; text-align: left; padding: 7px 8px; border-radius: 6px; border: none; background: none; font-size: 0.82rem; color: var(--ink); cursor: pointer; font-family: inherit; }
+    .dropdown-option-btn:hover { background: #faf7f3; color: var(--coral); }
+    .dropdown-option-btn.reject-opt { color: var(--bad); }
+    .dropdown-option-btn.reject-opt:hover { background: #fff0f0; }
+    .dropdown-divider { border-top: 1px solid var(--line); margin: 4px 0; }
 
+    .table-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; font-size: 0.8rem; }
+    .table-toolbar a { font-weight: 700; text-decoration: none; }
+    .table-toolbar-spacer { flex: 1; }
+    .page-size-label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .page-size-label select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); font-size: 0.8rem; }
+    .pagination-bar { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; font-size: 0.82rem; }
+    .pagination-bar button { font-size: 0.78rem; font-weight: 700; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+    .pagination-bar button:hover:not(:disabled) { border-color: var(--coral); color: var(--coral); }
+    .pagination-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    @media (max-width: 480px) {
+      .product-row { flex-wrap: wrap; }
+      .col-select { order: 1; }
+      .col-img { order: 2; }
+      .col-name { order: 3; flex: 1 1 100%; }
+      .col-margin { order: 4; }
+      .col-status { order: 5; }
+      .col-actions { order: 6; margin-left: auto; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>🎀 Mirthovia — Product Scanner</h1>
-    <p class="sub">Finds profitable, on-brand products to import into your <a href="https://mirthovia.wed2c.com" target="_blank">Mirthovia store</a> — checkout and fulfillment happen there, not here. Click a product for photos, video, pricing, and Instagram-ready content.</p>
+    <p class="sub">Finds profitable, on-brand products. Click a product for photos, video, pricing, and Instagram-ready content.</p>
 
     <div class="panel">
       <div class="controls">
@@ -90,73 +139,149 @@
            style="font-size:0.85rem;font-weight:700;padding:9px 16px;border-radius:8px;border:1px solid var(--line);color:var(--ink);text-decoration:none;white-space:nowrap">History</a>
       </form>
       {% if add_error %}<p style="color:#a32020;font-size:0.8rem;margin:10px 0 0">{{ add_error }}</p>{% endif %}
-      <p style="font-size:0.74rem;color:var(--muted);margin:8px 0 0">
-        Pulls real cost + live shipping quotes straight from CJ for one product, outside the scan - good for grabbing
-        a specific product's photos/video fast when you just want to post it, not scan a whole category.
-      </p>
     </div>
 
     {% if not all_products %}
       <p class="empty">No scan results yet — click "Run new scan" above. Takes a few minutes (CJ rate-limits to ~1 call/sec).</p>
     {% else %}
       <p class="sub">Last scan: {{ generated_at }}</p>
-      <div class="notice">
-        Card prices are rough suggestions, not market research. Click into a product to check it against a real price
-        you found online before deciding — the break-even line there is what actually matters.
-      </div>
-
-      {% macro product_card(p) %}
-      <div class="card" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}">
-        <input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)">
-        <a href="/product/{{ p.pid }}" style="color:inherit;text-decoration:none">
-          <div class="card-img-wrap">
-            {% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}
-          </div>
-          <div class="card-body">
-            <div class="cat-tag">{{ p.category }}</div>
-            <p class="product-name">{{ p.name }}</p>
-            <div class="card-row">
-              <span class="margin-chip">{{ p.worst_case_margin_pct }}% margin</span>
-              <span class="competition-chip competition-{{ p.competition | lower }}">{{ p.competition }}</span>
+      {% macro product_row(p) %}
+      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}">
+        <div class="col-select"><input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)"></div>
+        <div class="col-img">
+          <div class="row-img-wrap">{% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}</div>
+        </div>
+        <div class="col-name">
+          <div class="cat-tag">{{ p.category }}</div>
+          <a class="row-name" href="/product/{{ p.pid }}">{{ p.name }}</a>
+          <div class="found-date">{{ 'Found ' + p.found_at[:10] if p.found_at else 'Found date unknown' }}</div>
+        </div>
+        <div class="col-margin">
+          <span class="margin-chip">{{ p.worst_case_margin_pct }}% margin</span>
+          <span class="competition-chip competition-{{ p.competition | lower }}">{{ p.competition }}</span>
+        </div>
+        <div class="col-status">
+          <span class="posted-chip{{ ' active' if p.posted_instagram else '' }}">📸 IG</span>
+          <span class="posted-chip{{ ' active' if p.posted_pinterest else '' }}">📌 Pin</span>
+          <span class="posted-chip{{ ' active' if p.added_to_store else '' }}">🏪 Store</span>
+        </div>
+        <div class="col-actions">
+          <div class="row-menu">
+            <button type="button" class="kebab-btn" onclick="toggleDropdown(event, 'rowMenu{{ p.pid }}')" title="More options">⋮</button>
+            <div class="dropdown-panel row-menu-panel" id="rowMenu{{ p.pid }}" style="display:none">
+              <a class="dropdown-option" href="/product/{{ p.pid }}">View</a>
+              <a class="dropdown-option" href="{{ p.product_url }}" target="_blank" rel="noopener">View on CJ</a>
+              <a class="dropdown-option" href="/download-all/{{ p.pid }}">⬇ Download photos</a>
+              <button type="button" class="dropdown-option-btn" onclick="copyChatGptPrompt('{{ p.pid }}', this)">📋 Copy prompt for ChatGPT</button>
+              <div class="dropdown-divider"></div>
+              {% if not p.added_to_store %}
+              <form method="post" action="/added-to-store/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="redirect_to" value="/">
+                <button type="submit" class="dropdown-option-btn">🏪 Added to store</button>
+              </form>
+              {% endif %}
+              <form method="post" action="/reject/{{ p.pid }}">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="rejected" value="{{ 'false' if p.rejected else 'true' }}">
+                <input type="hidden" name="redirect_to" value="/">
+                <button type="submit" class="dropdown-option-btn reject-opt">{{ '↺ Un-reject' if p.rejected else '✗ Reject' }}</button>
+              </form>
             </div>
           </div>
-        </a>
-        <div class="card-footer">
-          <a class="view-btn" href="/product/{{ p.pid }}">View</a>
-          <span class="posted-chip" style="color: {{ 'var(--good)' if p.posted_instagram else 'var(--muted)' }}">📸 {{ 'IG ✓' if p.posted_instagram else 'IG —' }}</span>
-          <span class="posted-chip" style="color: {{ 'var(--good)' if p.posted_pinterest else 'var(--muted)' }}">📌 {{ 'Pin ✓' if p.posted_pinterest else 'Pin —' }}</span>
         </div>
       </div>
       {% endmacro %}
 
       <h2 class="section">All products ({{ all_products | length }})</h2>
 
-      <p class="filter-label">Status</p>
-      <div class="filter-bar" id="statusFilterBar">
-        <button class="filter-btn active" data-value="all" onclick="setStatusFilter('all', this)">All</button>
-        <button class="filter-btn" data-value="no" onclick="setStatusFilter('no', this)">📅 Unposted</button>
-        <button class="filter-btn" data-value="yes" onclick="setStatusFilter('yes', this)">✓ Posted</button>
+      <div class="filter-row">
+        <div class="dropdown-filter" id="statusDropdown">
+          <button type="button" class="dropdown-toggle" id="statusToggleBtn" onclick="toggleDropdown(event, 'statusPanel')">Status ▾</button>
+          <div class="dropdown-panel" id="statusPanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('status-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('status-checkbox', false);return false">Clear</a>
+            </div>
+            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="unposted" onchange="onFilterChange()"> 📅 Unposted</label>
+            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="posted" onchange="onFilterChange()"> ✓ Posted</label>
+            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="store" onchange="onFilterChange()"> 🏪 In store</label>
+            <div style="border-top:1px solid var(--line);margin:6px 0"></div>
+            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="rejected" onchange="onFilterChange()"> 🗑 Show rejected too</label>
+          </div>
+        </div>
+
+        <div class="dropdown-filter" id="seasonDropdown">
+          <button type="button" class="dropdown-toggle" id="seasonToggleBtn" onclick="toggleDropdown(event, 'seasonPanel')">Season ▾</button>
+          <div class="dropdown-panel" id="seasonPanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('season-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('season-checkbox', false);return false">Clear</a>
+            </div>
+            <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="winter" checked onchange="onFilterChange()"> ❄️ Winter</label>
+            <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="summer" checked onchange="onFilterChange()"> ☀️ Summer</label>
+            <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="all" checked onchange="onFilterChange()"> 🌍 Year-round</label>
+          </div>
+        </div>
+
+        <div class="dropdown-filter" id="categoryDropdown">
+          <button type="button" class="dropdown-toggle" id="categoryToggleBtn" onclick="toggleDropdown(event, 'categoryPanel')">Category ▾</button>
+          <div class="dropdown-panel" id="categoryPanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('category-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('category-checkbox', false);return false">Clear</a>
+            </div>
+            {% for cat in categories_present %}
+              <label class="dropdown-option">
+                <input type="checkbox" class="category-checkbox" value="{{ cat }}" checked onchange="onFilterChange()">
+                {{ cat }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% if scan_dates_present %}
+        <div class="dropdown-filter" id="foundDropdown">
+          <button type="button" class="dropdown-toggle" id="foundToggleBtn" onclick="toggleDropdown(event, 'foundPanel')">Scan date ▾</button>
+          <div class="dropdown-panel" id="foundPanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('found-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('found-checkbox', false);return false">Clear</a>
+            </div>
+            {% for d in scan_dates_present %}
+              <label class="dropdown-option"><input type="checkbox" class="found-checkbox" value="{{ d }}" checked onchange="onFilterChange()"> {{ d }}</label>
+            {% endfor %}
+            <label class="dropdown-option"><input type="checkbox" class="found-checkbox" value="" checked onchange="onFilterChange()"> Unknown date</label>
+          </div>
+        </div>
+        {% endif %}
+
+        <button type="button" class="clear-filters-btn" onclick="clearAllFilters()">✕ Clear filters</button>
       </div>
 
-      <p class="filter-label">Season</p>
-      <div class="filter-bar" id="seasonFilterBar">
-        <button class="filter-btn active" data-value="all" onclick="setSeasonFilter('all', this)">All</button>
-        <button class="filter-btn" data-value="winter" onclick="setSeasonFilter('winter', this)">❄️ Winter</button>
-        <button class="filter-btn" data-value="summer" onclick="setSeasonFilter('summer', this)">☀️ Summer</button>
+      <div class="table-toolbar">
+        <a href="#" onclick="selectAllOnPage(true);return false">Select all on page</a>
+        <a href="#" onclick="selectAllOnPage(false);return false">Deselect all</a>
+        <span class="table-toolbar-spacer"></span>
+        <label class="page-size-label">Show
+          <select id="pageSizeSelect" onchange="onPageSizeChange(this.value)">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+          per page
+        </label>
       </div>
 
-      <p class="filter-label">Category</p>
-      <div class="filter-bar" id="categoryFilterBar">
-        <button class="filter-btn active" data-value="all" onclick="setCategoryFilter('all', this)">All</button>
-        {% for cat in categories_present %}
-          <button class="filter-btn" data-value="{{ cat }}" onclick="setCategoryFilter('{{ cat }}', this)">{{ cat }}</button>
-        {% endfor %}
+      <div class="products-grid" id="productGrid">
+        {% for p in all_products %}{{ product_row(p) }}{% endfor %}
       </div>
-
-      <div class="grid" id="productGrid">
-        {% for p in all_products %}{{ product_card(p) }}{% endfor %}
+      <p class="empty" id="noMatches" style="display:none">No products match the current filters.</p>
+      <div class="pagination-bar" id="paginationBar">
+        <button type="button" id="prevPageBtn" onclick="goToPage(currentPage - 1)">‹ Prev</button>
+        <span id="pageIndicator"></span>
+        <button type="button" id="nextPageBtn" onclick="goToPage(currentPage + 1)">Next ›</button>
       </div>
-      <p class="empty" id="noMatches" style="display:none">No products match both filters.</p>
     {% endif %}
   </div>
 
@@ -169,46 +294,255 @@
     <span id="captionResult" style="flex-basis:100%;font-size:0.8rem;color:#f0e8e4;white-space:pre-wrap"></span>
   </div>
 
+  <button type="button" id="toTopBtn" title="Back to top">⬆</button>
+
+  <script type="application/json" id="initialLogsData">{{ initial_logs_json | safe }}</script>
   <script>
     let polling = null;
 
-    let statusFilter = "all";
-    let categoryFilter = "all";
-    let seasonFilter = "all";
+    // --- filters: multi-select per group, state lives in the URL query
+    // string (?status=...&season=...&cats=...) so filters survive a page
+    // refresh and the browser Back button, not just in-page JS state. ---
 
-    function setStatusFilter(value, btn) {
-      statusFilter = value;
-      document.querySelectorAll("#statusFilterBar .filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+    const DEFAULT_STATUS = [];
+    const DEFAULT_SEASON = ["winter", "summer", "all"];
+    const DEFAULT_PAGE_SIZE = 20;
+    let PAGE_SIZE = DEFAULT_PAGE_SIZE;
+    let currentPage = 1;
+
+    function onPageSizeChange(value) {
+      PAGE_SIZE = parseInt(value, 10);
+      currentPage = 1;
       applyFilters();
     }
 
-    function setCategoryFilter(value, btn) {
-      categoryFilter = value;
-      document.querySelectorAll("#categoryFilterBar .filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+    function selectAllOnPage(checked) {
+      document.querySelectorAll("#productGrid .product-row").forEach(row => {
+        if (row.style.display === "none") return;
+        const cb = row.querySelector(".card-select");
+        cb.checked = checked;
+        toggleSelect(cb);
+      });
+    }
+
+    function copyChatGptPrompt(pid, btn) {
+      const original = btn.textContent;
+      btn.textContent = "Copying...";
+      fetch(`/product/${pid}/generate-content-prompt`, { method: "POST" })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) {
+            btn.textContent = "Failed: " + (data.error || "unknown error");
+            setTimeout(() => btn.textContent = original, 1500);
+            return;
+          }
+          navigator.clipboard.writeText(data.prompt).then(() => {
+            btn.textContent = "Copied!";
+            setTimeout(() => btn.textContent = original, 1200);
+          });
+        })
+        .catch(() => {
+          btn.textContent = "Could not reach the server.";
+          setTimeout(() => btn.textContent = original, 1500);
+        });
+    }
+
+    function toggleDropdown(e, panelId) {
+      e.stopPropagation();
+      const panel = document.getElementById(panelId);
+      const opening = panel.style.display === "none";
+      document.querySelectorAll(".dropdown-panel").forEach(p => p.style.display = "none");
+      if (!opening) return;
+      panel.style.display = "block";
+      // A row's kebab menu sits inside the horizontally-scrollable table
+      // wrapper, which clips plain absolute positioning - so pin it with
+      // position:fixed, computed from the button's real screen position,
+      // instead of letting it get cut off near the table's edges.
+      if (panel.classList.contains("row-menu-panel")) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        panel.style.position = "fixed";
+        panel.style.top = (rect.bottom + 4) + "px";
+        panel.style.left = Math.max(8, rect.right - panel.offsetWidth) + "px";
+      }
+    }
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".dropdown-filter") && !e.target.closest(".row-menu")) {
+        document.querySelectorAll(".dropdown-panel").forEach(p => p.style.display = "none");
+      }
+    });
+
+    function setAllInGroup(className, checked) {
+      document.querySelectorAll("." + className).forEach(cb => cb.checked = checked);
+      onFilterChange();
+    }
+
+    function getChecked(className) {
+      return Array.from(document.querySelectorAll("." + className + ":checked")).map(cb => cb.value);
+    }
+
+    function getAllValues(className) {
+      return Array.from(document.querySelectorAll("." + className)).map(cb => cb.value);
+    }
+
+    function updateToggleLabel(btnId, className, allLabel, defaultValues) {
+      const selected = getChecked(className);
+      const btn = document.getElementById(btnId);
+      const isDefault = selected.length === defaultValues.length
+        && selected.every(v => defaultValues.includes(v));
+      let text;
+      if (isDefault) text = allLabel + " ▾";
+      else if (selected.length === 0) text = "None ▾";
+      else text = selected.length + " selected ▾";
+      btn.textContent = text;
+      btn.classList.toggle("filtered", !isDefault);
+    }
+
+    function syncUrl() {
+      const params = new URLSearchParams();
+      const status = getChecked("status-checkbox");
+      const season = getChecked("season-checkbox");
+      const cats = getChecked("category-checkbox");
+      const allCats = getAllValues("category-checkbox");
+      if (status.sort().join(",") !== [...DEFAULT_STATUS].sort().join(",")) params.set("status", status.join(","));
+      if (season.sort().join(",") !== [...DEFAULT_SEASON].sort().join(",")) params.set("season", season.join(","));
+      if (cats.length !== allCats.length) params.set("cats", cats.join(","));
+      if (document.querySelector(".found-checkbox")) {
+        const found = getChecked("found-checkbox");
+        const allFound = getAllValues("found-checkbox");
+        if (found.length !== allFound.length) params.set("found", found.join(","));
+      }
+      if (currentPage !== 1) params.set("page", String(currentPage));
+      if (PAGE_SIZE !== DEFAULT_PAGE_SIZE) params.set("size", String(PAGE_SIZE));
+      const qs = params.toString();
+      const newUrl = location.pathname + (qs ? "?" + qs : "");
+      history.replaceState(null, "", newUrl);
+    }
+
+    function applyFromUrl() {
+      const params = new URLSearchParams(location.search);
+      if (params.has("status")) {
+        const vals = params.get("status").split(",").filter(Boolean);
+        document.querySelectorAll(".status-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
+      }
+      if (params.has("season")) {
+        const vals = params.get("season").split(",").filter(Boolean);
+        document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
+      }
+      if (params.has("cats")) {
+        const vals = params.get("cats").split(",").filter(Boolean);
+        document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
+      }
+      if (params.has("found")) {
+        const vals = params.get("found").split(",");
+        document.querySelectorAll(".found-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
+      }
+      const page = parseInt(params.get("page"), 10);
+      currentPage = page && page > 0 ? page : 1;
+      const size = parseInt(params.get("size"), 10);
+      PAGE_SIZE = [20, 50, 100].includes(size) ? size : DEFAULT_PAGE_SIZE;
+      document.getElementById("pageSizeSelect").value = String(PAGE_SIZE);
+    }
+
+    function clearAllFilters() {
+      document.querySelectorAll(".status-checkbox").forEach(cb => cb.checked = DEFAULT_STATUS.includes(cb.value));
+      document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = true);
+      document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = true);
+      document.querySelectorAll(".found-checkbox").forEach(cb => cb.checked = true);
+      PAGE_SIZE = DEFAULT_PAGE_SIZE;
+      document.getElementById("pageSizeSelect").value = String(PAGE_SIZE);
+      currentPage = 1;
       applyFilters();
     }
 
-    function setSeasonFilter(value, btn) {
-      seasonFilter = value;
-      document.querySelectorAll("#seasonFilterBar .filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+    function goToPage(n) {
+      currentPage = n;
+      applyFilters();
+      document.getElementById("productGrid").scrollIntoView({ block: "start" });
+    }
+
+    function onFilterChange() {
+      currentPage = 1;
       applyFilters();
     }
 
     function applyFilters() {
-      let visibleCount = 0;
-      document.querySelectorAll("#productGrid .card").forEach(card => {
-        const statusOk = statusFilter === "all" || card.dataset.posted === statusFilter;
-        const categoryOk = categoryFilter === "all" || card.dataset.category === categoryFilter;
-        const seasonOk = seasonFilter === "all" || card.dataset.season === seasonFilter;
-        const show = statusOk && categoryOk && seasonOk;
-        card.style.display = show ? "" : "none";
-        if (show) visibleCount++;
+      const selectedStatus = getChecked("status-checkbox");
+      const selectedSeasons = getChecked("season-checkbox");
+      const selectedCategories = getChecked("category-checkbox");
+      const allCatsSelected = selectedCategories.length === getAllValues("category-checkbox").length;
+      const hasFoundFilter = document.querySelector(".found-checkbox") !== null;
+      const selectedFound = hasFoundFilter ? getChecked("found-checkbox") : [];
+      const allFoundSelected = hasFoundFilter && selectedFound.length === getAllValues("found-checkbox").length;
+
+      updateToggleLabel("statusToggleBtn", "status-checkbox", "Status: All", DEFAULT_STATUS);
+      updateToggleLabel("seasonToggleBtn", "season-checkbox", "Season: All", DEFAULT_SEASON);
+      updateToggleLabel("categoryToggleBtn", "category-checkbox", "Category: All", getAllValues("category-checkbox"));
+      if (hasFoundFilter) updateToggleLabel("foundToggleBtn", "found-checkbox", "Scan date: All", getAllValues("found-checkbox"));
+
+      // "Show rejected too" is its own on/off toggle, independent of the
+      // unposted/posted/store narrowing below - a rejected product never
+      // shows just because it happens to also be "unposted", say.
+      const showRejectedToo = selectedStatus.includes("rejected");
+      const statusNarrowing = selectedStatus.filter(s => s !== "rejected");
+
+      const allRows = Array.from(document.querySelectorAll("#productGrid .product-row"));
+      const matching = allRows.filter(row => {
+        const rejected = row.dataset.rejected === "yes";
+        let statusOk;
+        if (rejected) {
+          statusOk = showRejectedToo;
+        } else if (statusNarrowing.length === 0) {
+          statusOk = true; // nothing checked in this group = no narrowing, show all
+        } else {
+          const labels = [row.dataset.posted === "yes" ? "posted" : "unposted"];
+          if (row.dataset.store === "yes") labels.push("store");
+          statusOk = labels.some(l => statusNarrowing.includes(l));
+        }
+        const categoryOk = allCatsSelected || selectedCategories.includes(row.dataset.category);
+        const seasonOk = selectedSeasons.includes(row.dataset.season);
+        const foundOk = !hasFoundFilter || allFoundSelected || selectedFound.includes(row.dataset.found);
+        return statusOk && categoryOk && seasonOk && foundOk;
       });
-      document.getElementById("noMatches").style.display = visibleCount === 0 ? "block" : "none";
+
+      const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      const startIdx = (currentPage - 1) * PAGE_SIZE;
+      const pageRows = new Set(matching.slice(startIdx, startIdx + PAGE_SIZE));
+
+      allRows.forEach(row => { row.style.display = pageRows.has(row) ? "" : "none"; });
+
+      document.getElementById("noMatches").style.display = matching.length === 0 ? "block" : "none";
+      document.getElementById("pageIndicator").textContent = matching.length === 0
+        ? "" : `Page ${currentPage} of ${totalPages} (${matching.length} product${matching.length === 1 ? "" : "s"})`;
+      document.getElementById("prevPageBtn").disabled = currentPage <= 1;
+      document.getElementById("nextPageBtn").disabled = currentPage >= totalPages;
+      document.getElementById("paginationBar").style.display = matching.length > PAGE_SIZE ? "flex" : "none";
+
+      syncUrl();
     }
+
+    // Keep the "return to the dashboard" forms (mark added-to-store, reject)
+    // pointed at the current filtered URL, not a bare "/", so the filter
+    // state survives those redirects too.
+    document.querySelectorAll('form input[name="redirect_to"]').forEach(input => {
+      if (input.value === "/") {
+        input.form.addEventListener("submit", () => {
+          input.value = location.pathname + location.search;
+          try { sessionStorage.setItem("dashboardScrollY", window.scrollY); } catch (e) {}
+        });
+      }
+    });
+
+    applyFromUrl();
+    applyFilters();
+
+    const topBtn = document.getElementById("toTopBtn");
+    window.addEventListener("scroll", () => {
+      topBtn.style.display = window.scrollY > 400 ? "flex" : "none";
+    });
+    topBtn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
     let selected = new Map();
 
@@ -233,6 +567,7 @@
       const count = selected.size;
       document.getElementById("selectionCount").textContent = count + " selected";
       bar.style.display = count > 0 ? "flex" : "none";
+      document.getElementById("toTopBtn").style.bottom = count > 0 ? "70px" : "18px";
       if (count === 0) document.getElementById("captionResult").textContent = "";
 
       const params = Array.from(selected.keys()).map(pid => "pids=" + encodeURIComponent(pid)).join("&");
@@ -317,7 +652,7 @@
     }
 
     const initialStatus = "{{ status }}";
-    const initialLogs = {{ initial_logs_json | safe }};
+    const initialLogs = JSON.parse(document.getElementById("initialLogsData").textContent);
     setStatus(initialStatus, "{{ error or '' }}");
     if (initialLogs.length) {
       const logBox = document.getElementById("log");
@@ -331,6 +666,21 @@
       polling = setInterval(poll, 1500);
       poll();
     }
+
+    // A card button (Mark posted / Added to store / Reject) submits a real
+    // form and the server redirects back here - that's a full page load,
+    // which the browser resets to the top of by default. Restore wherever
+    // the user was, instead of dropping them back at the top of 101 rows.
+    // Done last (after the scan-log box above may have just expanded the
+    // page) and via rAF so the restore lands after layout has settled.
+    try {
+      const savedScrollY = sessionStorage.getItem("dashboardScrollY");
+      if (savedScrollY !== null) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.scrollTo(0, parseInt(savedScrollY, 10));
+        }));
+      }
+    } catch (e) {}
   </script>
 </body>
 </html>
