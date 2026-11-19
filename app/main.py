@@ -549,39 +549,60 @@ async def convert_media_route(
 
 
 @app.get("/collection-download")
-def collection_download_route(pids: list[str] = Query(...), variant: str = "original"):
-    """Each selected product's main photo as its own file in one zip - for
-    posting them together as an Instagram carousel (or building your own
-    collage in Canva) without merging them into a single image yourself."""
+def collection_download_route(
+    pids: list[str] = Query(...),
+    variant: str = "original",
+    all_photos: bool = False,
+):
+    """One file per selected product (just the main photo) by default, or
+    every photo for every selected product (in its own numbered subfolder)
+    when all_photos is set - for when you want the full gallery of all 3
+    products to pick from yourself, not just one thumbnail each."""
     import requests as _requests
 
     if variant not in DOWNLOAD_VARIANTS:
         return JSONResponse({"error": f"Unknown variant: {variant}"}, status_code=400)
     platform_canvas = DOWNLOAD_VARIANTS[variant]
 
+    def _export(url: str) -> tuple[bytes, str] | None:
+        try:
+            r = _requests.get(url, timeout=30)
+            r.raise_for_status()
+            content = r.content
+        except Exception:
+            return None
+        if platform_canvas:
+            try:
+                return export_image(content, *platform_canvas), ".jpg"
+            except Exception:
+                return None
+        ext = ".png" if url.lower().endswith(".png") else ".jpg"
+        return content, ext
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, pid in enumerate(pids, start=1):
             product = _find_product(pid)
-            if not product or not product.get("image"):
+            if not product:
                 continue
-            try:
-                r = _requests.get(product["image"], timeout=30)
-                r.raise_for_status()
-                content = r.content
-            except Exception:
+            safe_name = _safe_filename(product.get("name", pid))
+
+            if not all_photos:
+                if not product.get("image"):
+                    continue
+                exported = _export(product["image"])
+                if exported:
+                    content, ext = exported
+                    zf.writestr(f"{i:02d}-{safe_name}{ext}", content)
                 continue
 
-            if platform_canvas:
-                try:
-                    content = export_image(content, *platform_canvas)
-                    ext = ".jpg"
-                except Exception:
-                    continue  # skip a photo that fails to export rather than fail the whole zip
-            else:
-                ext = ".png" if product["image"].lower().endswith(".png") else ".jpg"
-
-            zf.writestr(f"{i:02d}-{_safe_filename(product['name'])}{ext}", content)
+            images, _video_url, _error = _fetch_media(pid, product.get("image"))
+            for j, url in enumerate(images, start=1):
+                exported = _export(url)
+                if not exported:
+                    continue
+                content, ext = exported
+                zf.writestr(f"{i:02d}-{safe_name}/{j:02d}{ext}", content)
 
     buf.seek(0)
     return StreamingResponse(

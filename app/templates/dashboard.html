@@ -35,6 +35,7 @@
     .notice { border: 1px solid var(--line); border-left: 3px solid var(--coral); border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; color: #6b5a55; margin-bottom: 18px; }
     .empty { color: var(--muted); padding: 16px 0; font-size: 0.9rem; }
 
+    .product-search-input { width: 100%; max-width: 360px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 0.85rem; margin-bottom: 10px; }
     .filter-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 14px; }
     .dropdown-filter { position: relative; display: inline-block; }
     .dropdown-toggle { font-size: 0.78rem; font-weight: 700; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
@@ -183,7 +184,7 @@
     {% else %}
       <p class="sub">Last scan: {{ generated_at }}</p>
       {% macro product_row(p) %}
-      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}">
+      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}" data-name="{{ p.name | lower }}">
         <div class="col-select"><input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)"></div>
         <div class="col-img">
           <div class="row-img-wrap">{% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}</div>
@@ -252,6 +253,9 @@
       {% endmacro %}
 
       <h2 class="section">All products ({{ all_products | length }})</h2>
+
+      <input type="text" id="productSearchInput" class="product-search-input" placeholder="Search your products by name..."
+             oninput="onFilterChange()">
 
       <div class="filter-row">
         <div class="dropdown-filter" id="statusDropdown">
@@ -352,6 +356,9 @@
       <option value="pinterest-standard">Pinterest — Standard Pin 1000×1500</option>
       <option value="pinterest-square">Pinterest — Square 1000×1000</option>
     </select>
+    <label style="font-size:0.8rem;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="collectionAllPhotosCheckbox" onchange="updateSelectionBar()"> All photos, not just main
+    </label>
     <a id="downloadSelectedBtn" href="#" style="background:#fff;color:var(--ink);text-decoration:none;font-weight:700;padding:7px 14px;border-radius:6px;font-size:0.8rem">⬇ Download photos (ZIP)</a>
     <button onclick="generateCollectionCaption()">✨ Generate caption</button>
     <button class="clear-btn" onclick="copyCollectionPrompt()">📋 Copy prompt for ChatGPT</button>
@@ -577,6 +584,8 @@
       }
       if (currentPage !== 1) params.set("page", String(currentPage));
       if (PAGE_SIZE !== DEFAULT_PAGE_SIZE) params.set("size", String(PAGE_SIZE));
+      const q = document.getElementById("productSearchInput").value.trim();
+      if (q) params.set("q", q);
       const qs = params.toString();
       const newUrl = location.pathname + (qs ? "?" + qs : "");
       history.replaceState(null, "", newUrl);
@@ -605,6 +614,7 @@
       const size = parseInt(params.get("size"), 10);
       PAGE_SIZE = [20, 50, 100].includes(size) ? size : DEFAULT_PAGE_SIZE;
       document.getElementById("pageSizeSelect").value = String(PAGE_SIZE);
+      if (params.has("q")) document.getElementById("productSearchInput").value = params.get("q");
     }
 
     function clearAllFilters() {
@@ -612,6 +622,7 @@
       document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = true);
       document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = true);
       document.querySelectorAll(".found-checkbox").forEach(cb => cb.checked = true);
+      document.getElementById("productSearchInput").value = "";
       PAGE_SIZE = DEFAULT_PAGE_SIZE;
       document.getElementById("pageSizeSelect").value = String(PAGE_SIZE);
       currentPage = 1;
@@ -648,6 +659,7 @@
       // shows just because it happens to also be "unposted", say.
       const showRejectedToo = selectedStatus.includes("rejected");
       const statusNarrowing = selectedStatus.filter(s => s !== "rejected");
+      const searchQuery = document.getElementById("productSearchInput").value.trim().toLowerCase();
 
       const allRows = Array.from(document.querySelectorAll("#productGrid .product-row"));
       const matching = allRows.filter(row => {
@@ -665,7 +677,8 @@
         const categoryOk = allCatsSelected || selectedCategories.includes(row.dataset.category);
         const seasonOk = selectedSeasons.includes(row.dataset.season);
         const foundOk = !hasFoundFilter || allFoundSelected || selectedFound.includes(row.dataset.found);
-        return statusOk && categoryOk && seasonOk && foundOk;
+        const nameOk = !searchQuery || row.dataset.name.includes(searchQuery);
+        return statusOk && categoryOk && seasonOk && foundOk && nameOk;
       });
 
       const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
@@ -735,7 +748,9 @@
 
       const params = Array.from(selected.keys()).map(pid => "pids=" + encodeURIComponent(pid)).join("&");
       const variant = document.getElementById("collectionVariantSelect").value;
-      document.getElementById("downloadSelectedBtn").href = "/collection-download?" + params + "&variant=" + variant;
+      const allPhotos = document.getElementById("collectionAllPhotosCheckbox").checked;
+      document.getElementById("downloadSelectedBtn").href =
+        "/collection-download?" + params + "&variant=" + variant + "&all_photos=" + allPhotos;
     }
 
     function generateCollectionCaption() {
