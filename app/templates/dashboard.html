@@ -184,7 +184,7 @@
     {% else %}
       <p class="sub">Last scan: {{ generated_at }}</p>
       {% macro product_row(p) %}
-      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}" data-name="{{ p.name | lower }}">
+      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-store-date="{{ p.added_to_store[:10] if p.added_to_store else '' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-rejected-date="{{ p.rejected[:10] if p.rejected else '' }}" data-ig-date="{{ p.posted_instagram[:10] if p.posted_instagram else '' }}" data-pin-date="{{ p.posted_pinterest[:10] if p.posted_pinterest else '' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}" data-name="{{ p.name | lower }}">
         <div class="col-select"><input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)"></div>
         <div class="col-img">
           <div class="row-img-wrap">{% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}</div>
@@ -202,7 +202,7 @@
           {% if p.rejected %}<span class="posted-chip rejected-chip">🗑 Rejected</span>{% endif %}
           <span class="posted-chip{{ ' active' if p.posted_instagram else '' }}">📸 IG</span>
           <span class="posted-chip{{ ' active' if p.posted_pinterest else '' }}">📌 Pin</span>
-          <span class="posted-chip{{ ' active' if p.added_to_store else '' }}">🏪 Store</span>
+          <span class="posted-chip{{ ' active' if p.added_to_store else '' }}">🏪 Store{{ ' (' + p.added_to_store[:10] + ')' if p.added_to_store else '' }}</span>
         </div>
         <div class="col-actions">
           <div class="row-menu">
@@ -318,6 +318,70 @@
         </div>
         {% endif %}
 
+        {% if store_dates_present %}
+        <div class="dropdown-filter" id="storeDateDropdown">
+          <button type="button" class="dropdown-toggle" id="storeDateToggleBtn" onclick="toggleDropdown(event, 'storeDatePanel')">Added to store date ▾</button>
+          <div class="dropdown-panel" id="storeDatePanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('store-date-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('store-date-checkbox', false);return false">Clear</a>
+            </div>
+            {% for d in store_dates_present %}
+              <label class="dropdown-option"><input type="checkbox" class="store-date-checkbox" value="{{ d }}" checked onchange="onFilterChange()"> {{ d }}</label>
+            {% endfor %}
+            <label class="dropdown-option"><input type="checkbox" class="store-date-checkbox" value="" checked onchange="onFilterChange()"> Not added to store</label>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if rejected_dates_present %}
+        <div class="dropdown-filter" id="rejectedDateDropdown">
+          <button type="button" class="dropdown-toggle" id="rejectedDateToggleBtn" onclick="toggleDropdown(event, 'rejectedDatePanel')">Rejected date ▾</button>
+          <div class="dropdown-panel" id="rejectedDatePanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('rejected-date-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('rejected-date-checkbox', false);return false">Clear</a>
+            </div>
+            {% for d in rejected_dates_present %}
+              <label class="dropdown-option"><input type="checkbox" class="rejected-date-checkbox" value="{{ d }}" checked onchange="onFilterChange()"> {{ d }}</label>
+            {% endfor %}
+            <label class="dropdown-option"><input type="checkbox" class="rejected-date-checkbox" value="" checked onchange="onFilterChange()"> Not rejected</label>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if ig_dates_present %}
+        <div class="dropdown-filter" id="igDateDropdown">
+          <button type="button" class="dropdown-toggle" id="igDateToggleBtn" onclick="toggleDropdown(event, 'igDatePanel')">Posted IG date ▾</button>
+          <div class="dropdown-panel" id="igDatePanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('ig-date-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('ig-date-checkbox', false);return false">Clear</a>
+            </div>
+            {% for d in ig_dates_present %}
+              <label class="dropdown-option"><input type="checkbox" class="ig-date-checkbox" value="{{ d }}" checked onchange="onFilterChange()"> {{ d }}</label>
+            {% endfor %}
+            <label class="dropdown-option"><input type="checkbox" class="ig-date-checkbox" value="" checked onchange="onFilterChange()"> Not posted</label>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if pin_dates_present %}
+        <div class="dropdown-filter" id="pinDateDropdown">
+          <button type="button" class="dropdown-toggle" id="pinDateToggleBtn" onclick="toggleDropdown(event, 'pinDatePanel')">Posted Pinterest date ▾</button>
+          <div class="dropdown-panel" id="pinDatePanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('pin-date-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('pin-date-checkbox', false);return false">Clear</a>
+            </div>
+            {% for d in pin_dates_present %}
+              <label class="dropdown-option"><input type="checkbox" class="pin-date-checkbox" value="{{ d }}" checked onchange="onFilterChange()"> {{ d }}</label>
+            {% endfor %}
+            <label class="dropdown-option"><input type="checkbox" class="pin-date-checkbox" value="" checked onchange="onFilterChange()"> Not posted</label>
+          </div>
+        </div>
+        {% endif %}
+
         <button type="button" class="clear-filters-btn" onclick="clearAllFilters()">✕ Clear filters</button>
       </div>
 
@@ -379,6 +443,17 @@
     const DEFAULT_STATUS = [];
     const DEFAULT_SEASON = ["winter", "summer", "all"];
     const DEFAULT_PAGE_SIZE = 20;
+    // Every "activity happened on this date" filter - add a new one here (plus its
+    // dropdown markup + a data-* attribute on .product-row) and the rest of the
+    // filtering code picks it up automatically, so "today's activity" stays easy
+    // to see across every status without duplicating this logic per filter.
+    const DATE_FILTERS = [
+      { param: "found", checkboxClass: "found-checkbox", dataAttr: "found", toggleBtn: "foundToggleBtn", label: "Scan date: All" },
+      { param: "storeDate", checkboxClass: "store-date-checkbox", dataAttr: "storeDate", toggleBtn: "storeDateToggleBtn", label: "Added to store date: All" },
+      { param: "rejectedDate", checkboxClass: "rejected-date-checkbox", dataAttr: "rejectedDate", toggleBtn: "rejectedDateToggleBtn", label: "Rejected date: All" },
+      { param: "igDate", checkboxClass: "ig-date-checkbox", dataAttr: "igDate", toggleBtn: "igDateToggleBtn", label: "Posted IG date: All" },
+      { param: "pinDate", checkboxClass: "pin-date-checkbox", dataAttr: "pinDate", toggleBtn: "pinDateToggleBtn", label: "Posted Pinterest date: All" },
+    ];
     let PAGE_SIZE = DEFAULT_PAGE_SIZE;
     let currentPage = 1;
 
@@ -577,11 +652,13 @@
       if (status.sort().join(",") !== [...DEFAULT_STATUS].sort().join(",")) params.set("status", status.join(","));
       if (season.sort().join(",") !== [...DEFAULT_SEASON].sort().join(",")) params.set("season", season.join(","));
       if (cats.length !== allCats.length) params.set("cats", cats.join(","));
-      if (document.querySelector(".found-checkbox")) {
-        const found = getChecked("found-checkbox");
-        const allFound = getAllValues("found-checkbox");
-        if (found.length !== allFound.length) params.set("found", found.join(","));
-      }
+      DATE_FILTERS.forEach(f => {
+        if (document.querySelector("." + f.checkboxClass)) {
+          const selected = getChecked(f.checkboxClass);
+          const all = getAllValues(f.checkboxClass);
+          if (selected.length !== all.length) params.set(f.param, selected.join(","));
+        }
+      });
       if (currentPage !== 1) params.set("page", String(currentPage));
       if (PAGE_SIZE !== DEFAULT_PAGE_SIZE) params.set("size", String(PAGE_SIZE));
       const q = document.getElementById("productSearchInput").value.trim();
@@ -605,10 +682,12 @@
         const vals = params.get("cats").split(",").filter(Boolean);
         document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
       }
-      if (params.has("found")) {
-        const vals = params.get("found").split(",");
-        document.querySelectorAll(".found-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
-      }
+      DATE_FILTERS.forEach(f => {
+        if (params.has(f.param)) {
+          const vals = params.get(f.param).split(",");
+          document.querySelectorAll("." + f.checkboxClass).forEach(cb => cb.checked = vals.includes(cb.value));
+        }
+      });
       const page = parseInt(params.get("page"), 10);
       currentPage = page && page > 0 ? page : 1;
       const size = parseInt(params.get("size"), 10);
@@ -621,7 +700,7 @@
       document.querySelectorAll(".status-checkbox").forEach(cb => cb.checked = DEFAULT_STATUS.includes(cb.value));
       document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = true);
       document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = true);
-      document.querySelectorAll(".found-checkbox").forEach(cb => cb.checked = true);
+      DATE_FILTERS.forEach(f => document.querySelectorAll("." + f.checkboxClass).forEach(cb => cb.checked = true));
       document.getElementById("productSearchInput").value = "";
       PAGE_SIZE = DEFAULT_PAGE_SIZE;
       document.getElementById("pageSizeSelect").value = String(PAGE_SIZE);
@@ -645,14 +724,17 @@
       const selectedSeasons = getChecked("season-checkbox");
       const selectedCategories = getChecked("category-checkbox");
       const allCatsSelected = selectedCategories.length === getAllValues("category-checkbox").length;
-      const hasFoundFilter = document.querySelector(".found-checkbox") !== null;
-      const selectedFound = hasFoundFilter ? getChecked("found-checkbox") : [];
-      const allFoundSelected = hasFoundFilter && selectedFound.length === getAllValues("found-checkbox").length;
+      const dateFilterStates = DATE_FILTERS.map(f => {
+        const has = document.querySelector("." + f.checkboxClass) !== null;
+        const selected = has ? getChecked(f.checkboxClass) : [];
+        const allSelected = has && selected.length === getAllValues(f.checkboxClass).length;
+        if (has) updateToggleLabel(f.toggleBtn, f.checkboxClass, f.label, getAllValues(f.checkboxClass));
+        return { ...f, has, selected, allSelected };
+      });
 
       updateToggleLabel("statusToggleBtn", "status-checkbox", "Status: All", DEFAULT_STATUS);
       updateToggleLabel("seasonToggleBtn", "season-checkbox", "Season: All", DEFAULT_SEASON);
       updateToggleLabel("categoryToggleBtn", "category-checkbox", "Category: All", getAllValues("category-checkbox"));
-      if (hasFoundFilter) updateToggleLabel("foundToggleBtn", "found-checkbox", "Scan date: All", getAllValues("found-checkbox"));
 
       // "Show rejected too" is its own on/off toggle, independent of the
       // unposted/posted/store narrowing below - a rejected product never
@@ -676,9 +758,9 @@
         }
         const categoryOk = allCatsSelected || selectedCategories.includes(row.dataset.category);
         const seasonOk = selectedSeasons.includes(row.dataset.season);
-        const foundOk = !hasFoundFilter || allFoundSelected || selectedFound.includes(row.dataset.found);
+        const datesOk = dateFilterStates.every(f => !f.has || f.allSelected || f.selected.includes(row.dataset[f.dataAttr]));
         const nameOk = !searchQuery || row.dataset.name.includes(searchQuery);
-        return statusOk && categoryOk && seasonOk && foundOk && nameOk;
+        return statusOk && categoryOk && seasonOk && datesOk && nameOk;
       });
 
       const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));

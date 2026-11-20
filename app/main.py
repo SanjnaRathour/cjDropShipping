@@ -412,9 +412,17 @@ def dashboard(request: Request):
         all_products = []
 
     categories_present = sorted({p["category"] for p in all_products})
-    scan_dates_present = sorted(
-        {p["found_at"][:10] for p in all_products if p.get("found_at")}, reverse=True
-    )
+
+    def _dates_present(field):
+        return sorted(
+            {p[field][:10] for p in all_products if p.get(field)}, reverse=True
+        )
+
+    scan_dates_present = _dates_present("found_at")
+    store_dates_present = _dates_present("added_to_store")
+    rejected_dates_present = _dates_present("rejected")
+    ig_dates_present = _dates_present("posted_instagram")
+    pin_dates_present = _dates_present("posted_pinterest")
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -423,6 +431,10 @@ def dashboard(request: Request):
             "generated_at": generated_at,
             "all_products": all_products,
             "scan_dates_present": scan_dates_present,
+            "store_dates_present": store_dates_present,
+            "rejected_dates_present": rejected_dates_present,
+            "ig_dates_present": ig_dates_present,
+            "pin_dates_present": pin_dates_present,
             "categories_present": categories_present,
             "status": status,
             "error": error,
