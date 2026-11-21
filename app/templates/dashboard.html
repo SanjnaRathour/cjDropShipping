@@ -426,6 +426,18 @@
     <a id="downloadSelectedBtn" href="#" style="background:#fff;color:var(--ink);text-decoration:none;font-weight:700;padding:7px 14px;border-radius:6px;font-size:0.8rem">⬇ Download photos (ZIP)</a>
     <button onclick="generateCollectionCaption()">✨ Generate caption</button>
     <button class="clear-btn" onclick="copyCollectionPrompt()">📋 Copy prompt for ChatGPT</button>
+    <select id="bulkActionSelect">
+      <option value="" selected disabled>Bulk mark...</option>
+      <option value="store:true">🏪 Add to store</option>
+      <option value="store:false">✗ Remove from store</option>
+      <option value="instagram:true">📸 Mark on Instagram</option>
+      <option value="instagram:false">↺ Un-mark Instagram</option>
+      <option value="pinterest:true">📌 Mark on Pinterest</option>
+      <option value="pinterest:false">↺ Un-mark Pinterest</option>
+      <option value="all:true">✓ Mark store + IG + Pinterest</option>
+      <option value="all:false">↺ Un-mark store + IG + Pinterest</option>
+    </select>
+    <button onclick="applyBulkAction()">Apply</button>
     <button class="clear-btn" onclick="clearSelection()">Clear</button>
     <span id="captionResult" style="flex-basis:100%;font-size:0.8rem;color:#f0e8e4;white-space:pre-wrap"></span>
   </div>
@@ -833,6 +845,38 @@
       const allPhotos = document.getElementById("collectionAllPhotosCheckbox").checked;
       document.getElementById("downloadSelectedBtn").href =
         "/collection-download?" + params + "&variant=" + variant + "&all_photos=" + allPhotos;
+    }
+
+    function applyBulkAction() {
+      const sel = document.getElementById("bulkActionSelect");
+      const val = sel.value;
+      if (!val || selected.size === 0) return;
+      const [field, flagStr] = val.split(":");
+      const value = flagStr === "true";
+      const fields = field === "all"
+        ? { store: value, instagram: value, pinterest: value }
+        : { [field]: value };
+      bulkMark(fields);
+      sel.value = "";
+    }
+
+    function bulkMark(fields) {
+      const items = Array.from(selected.entries()).map(([pid, name]) => ({ pid, name }));
+      if (items.length === 0) return;
+      fetch("/bulk-mark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, ...fields }),
+      })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) {
+            alert("Bulk update failed: " + (data.error || "unknown error"));
+            return;
+          }
+          location.reload();
+        })
+        .catch(() => alert("Could not reach the server."));
     }
 
     function generateCollectionCaption() {

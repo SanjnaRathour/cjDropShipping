@@ -480,6 +480,33 @@ def reject_product(pid: str, name: str = Form(...), rejected: str = Form("true")
     return RedirectResponse(redirect_to, status_code=303)
 
 
+@app.post("/bulk-mark")
+async def bulk_mark(request: Request):
+    """Apply store/Instagram/Pinterest status to several selected products at
+    once - same underlying per-product calls as the row kebab menu, just
+    looped, so one click can do what used to take one click per product."""
+    body = await request.json()
+    items = body.get("items", [])
+    store = body.get("store")
+    instagram = body.get("instagram")
+    pinterest = body.get("pinterest")
+    try:
+        for item in items:
+            pid = str(item.get("pid", "")).strip()
+            name = item.get("name", "") or ""
+            if not pid:
+                continue
+            if store is not None:
+                _set_added_to_store(pid, name, bool(store))
+            if instagram is not None:
+                _set_posted(pid, name, "instagram", bool(instagram))
+            if pinterest is not None:
+                _set_posted(pid, name, "pinterest", bool(pinterest))
+    except DBError as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+    return {"ok": True, "count": len(items)}
+
+
 @app.get("/download-image")
 def download_image(url: str, filename: str = "mirthovia-product.jpg"):
     """Proxies a CJ product image back with a Content-Disposition header so
