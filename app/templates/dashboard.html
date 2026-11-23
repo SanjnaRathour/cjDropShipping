@@ -217,6 +217,9 @@
                 <option value="/download-all/{{ p.pid }}?variant=instagram-portrait">Instagram — Portrait 1080×1350</option>
                 <option value="/download-all/{{ p.pid }}?variant=pinterest-standard">Pinterest — Standard Pin 1000×1500</option>
                 <option value="/download-all/{{ p.pid }}?variant=pinterest-square">Pinterest — Square 1000×1000</option>
+                <option value="/download-all/{{ p.pid }}?variant=instagram-square-crop">Square 1080×1080 — cropped, no blur (small icons/thumbnails)</option>
+                <option value="/download-all/{{ p.pid }}?variant=pinterest-square-crop">Square 1000×1000 — cropped, no blur (small icons/thumbnails)</option>
+                <option value="/download-all/{{ p.pid }}?variant=icon-480x640">Icon — 480×640, with safety margin (category/store icons)</option>
               </select>
               <button type="button" class="dropdown-option-btn" onclick="copyChatGptPrompt('{{ p.pid }}', this)">📋 Copy prompt for ChatGPT</button>
               <div class="dropdown-divider"></div>
@@ -419,6 +422,9 @@
       <option value="instagram-portrait">Instagram — Portrait 1080×1350</option>
       <option value="pinterest-standard">Pinterest — Standard Pin 1000×1500</option>
       <option value="pinterest-square">Pinterest — Square 1000×1000</option>
+      <option value="instagram-square-crop">Square 1080×1080 — cropped, no blur</option>
+      <option value="pinterest-square-crop">Square 1000×1000 — cropped, no blur</option>
+      <option value="icon-480x640">Icon — 480×640, with safety margin (category/store icons)</option>
     </select>
     <label style="font-size:0.8rem;display:flex;align-items:center;gap:5px;cursor:pointer">
       <input type="checkbox" id="collectionAllPhotosCheckbox" onchange="updateSelectionBar()"> All photos, not just main

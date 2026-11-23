@@ -523,7 +523,9 @@ def download_image(url: str, filename: str = "mirthovia-product.jpg"):
 
 
 @app.get("/export-image")
-def export_image_route(url: str, platform: str, canvas: str, filename: str = "mirthovia-export.jpg"):
+def export_image_route(
+    url: str, platform: str, canvas: str, mode: str = "fit", inset: float = 1.0, filename: str = "mirthovia-export.jpg"
+):
     """Actually crops + resizes the source photo to the platform's exact
     canvas size (not just a pass-through like /download-image) - e.g. a
     square CJ product photo center-cropped and resized to Pinterest's
@@ -533,7 +535,7 @@ def export_image_route(url: str, platform: str, canvas: str, filename: str = "mi
     r = _requests.get(url, timeout=30)
     r.raise_for_status()
     try:
-        out_bytes = export_image(r.content, platform, canvas)
+        out_bytes = export_image(r.content, platform, canvas, mode, inset)
     except UnknownCanvasError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -562,6 +564,8 @@ async def convert_media_route(
     file: UploadFile = File(...),
     platform: str = Form(...),
     canvas: str = Form(...),
+    mode: str = Form("fit"),
+    inset: float = Form(1.0),
 ):
     content = await file.read()
     if not content:
@@ -570,7 +574,7 @@ async def convert_media_route(
     ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
     try:
         if ext in IMAGE_EXTS:
-            out_bytes = export_image(content, platform, canvas)
+            out_bytes = export_image(content, platform, canvas, mode, inset)
             out_ext = ".jpg"
         else:
             out_bytes, out_ext = export_media(content, ext, platform, canvas)
@@ -676,10 +680,13 @@ def collection_caption_prompt_route(pids: list[str] = Form(...)):
 
 DOWNLOAD_VARIANTS = {
     "original": None,
-    "instagram-square": ("instagram", "square"),
-    "instagram-portrait": ("instagram", "portrait"),
-    "pinterest-standard": ("pinterest", "standard"),
-    "pinterest-square": ("pinterest", "square"),
+    "instagram-square": ("instagram", "square", "fit"),
+    "instagram-square-crop": ("instagram", "square", "crop"),
+    "instagram-portrait": ("instagram", "portrait", "fit"),
+    "pinterest-standard": ("pinterest", "standard", "fit"),
+    "pinterest-square": ("pinterest", "square", "fit"),
+    "pinterest-square-crop": ("pinterest", "square", "crop"),
+    "icon-480x640": ("icon", "480x640", "fit", 0.8),
 }
 
 

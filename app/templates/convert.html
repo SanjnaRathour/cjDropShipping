@@ -15,7 +15,7 @@
     .panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
     .field-label { font-size: 0.68rem; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; margin: 0 0 6px; display: block; }
     #fileInput { width: 100%; padding: 9px 0; font-size: 0.85rem; margin-bottom: 16px; }
-    #platformSelect { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 0.85rem; margin-bottom: 16px; }
+    #platformSelect, #modeSelect { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 0.85rem; margin-bottom: 16px; }
     .convert-btn { width: 100%; background: var(--coral); color: #fff; border: none; border-radius: 8px; padding: 11px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
     .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .convert-btn:hover:not(:disabled) { filter: brightness(1.05); }
@@ -37,11 +37,18 @@
       <input type="file" id="fileInput" accept="image/*,video/*,.gif">
 
       <span class="field-label">Target size</span>
-      <select id="platformSelect">
+      <select id="platformSelect" onchange="onPlatformChange()">
         <option value="instagram|square">Instagram — Square 1080×1080</option>
         <option value="instagram|portrait">Instagram — Portrait 1080×1350</option>
         <option value="pinterest|standard">Pinterest — Standard Pin 1000×1500</option>
         <option value="pinterest|square">Pinterest — Square 1000×1000</option>
+        <option value="icon|480x640">Icon — 480×640, with safety margin (category/store icons)</option>
+      </select>
+
+      <span class="field-label" id="modeLabel">Fit style (images only)</span>
+      <select id="modeSelect">
+        <option value="fit">Fit on blurred background — nothing cropped off</option>
+        <option value="crop">Crop to fill — no blur, sharp edge to edge (small icons/thumbnails)</option>
       </select>
 
       <button class="convert-btn" id="convertBtn" onclick="convertMedia()">Convert &amp; Download</button>
@@ -50,13 +57,23 @@
     </div>
 
     <div class="notice">
-      Images are fit onto a blurred letterbox background (nothing gets cropped off). GIFs and videos are instead
-      scaled and center-cropped to fill the exact frame (no letterbox) - videos come back as .mp4, GIFs stay .gif.
-      Large videos can take a little while to process.
+      "Fit" places the whole photo on a blurred letterbox background when its shape doesn't match the target -
+      good for feed posts where nothing should get cropped out. "Crop to fill" instead fills the entire frame with
+      sharp pixels and crops off the excess - better for small placements like a storefront category icon, where a
+      blurred border can make the whole thumbnail read as blurry. GIFs and videos always scale + center-crop to
+      fill the frame (no letterbox) regardless of this setting - videos come back as .mp4, GIFs stay .gif. Large
+      videos can take a little while to process.
     </div>
   </div>
 
   <script>
+    function onPlatformChange() {
+      const isIcon = document.getElementById("platformSelect").value.startsWith("icon|");
+      document.getElementById("modeLabel").style.display = isIcon ? "none" : "";
+      document.getElementById("modeSelect").style.display = isIcon ? "none" : "";
+    }
+    onPlatformChange();
+
     function convertMedia() {
       const fileInput = document.getElementById("fileInput");
       const file = fileInput.files[0];
@@ -76,10 +93,14 @@
       btn.disabled = true;
       status.textContent = "Converting... (videos can take a little while)";
 
+      const mode = platform === "icon" ? "fit" : document.getElementById("modeSelect").value;
+      const inset = platform === "icon" ? 0.8 : 1.0;
       const formData = new FormData();
       formData.append("file", file);
       formData.append("platform", platform);
       formData.append("canvas", canvas);
+      formData.append("mode", mode);
+      formData.append("inset", String(inset));
 
       fetch("/convert-media", { method: "POST", body: formData })
         .then(async (r) => {
