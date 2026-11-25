@@ -26,7 +26,7 @@ from app.gemini_client import (
 from app.image_export import export_image, export_media, ConversionError, UnknownCanvasError
 from app.instagram_specs import check_image_for_instagram, check_video_for_instagram
 from app.pinterest_specs import check_image_for_pinterest
-from app.picker import run_scan, load_last_scan, _score_product, season_for_category, CATEGORIES
+from app.picker import run_scan, load_last_scan, _score_product, season_for_category, gender_for_category, CATEGORIES
 
 PLATFORMS = ("instagram", "pinterest")
 
@@ -397,6 +397,7 @@ def dashboard(request: Request):
         p["added_to_store"] = entry.get("added_to_store")
         p["rejected"] = entry.get("rejected")
         p["season"] = season_for_category(p["category"])
+        p["gender"] = gender_for_category(p["category"])
         p["found_at"] = first_seen_dates.get(str(p["pid"]))
         return p
 
@@ -490,6 +491,7 @@ async def bulk_mark(request: Request):
     store = body.get("store")
     instagram = body.get("instagram")
     pinterest = body.get("pinterest")
+    rejected = body.get("rejected")
     try:
         for item in items:
             pid = str(item.get("pid", "")).strip()
@@ -502,6 +504,8 @@ async def bulk_mark(request: Request):
                 _set_posted(pid, name, "instagram", bool(instagram))
             if pinterest is not None:
                 _set_posted(pid, name, "pinterest", bool(pinterest))
+            if rejected is not None:
+                _set_rejected(pid, name, bool(rejected))
     except DBError as e:
         return JSONResponse({"error": str(e)}, status_code=503)
     return {"ok": True, "count": len(items)}

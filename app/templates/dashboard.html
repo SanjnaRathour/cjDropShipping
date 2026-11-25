@@ -184,7 +184,7 @@
     {% else %}
       <p class="sub">Last scan: {{ generated_at }}</p>
       {% macro product_row(p) %}
-      <div class="product-row" data-category="{{ p.category }}" data-season="{{ p.season }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-store-date="{{ p.added_to_store[:10] if p.added_to_store else '' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-rejected-date="{{ p.rejected[:10] if p.rejected else '' }}" data-ig-date="{{ p.posted_instagram[:10] if p.posted_instagram else '' }}" data-pin-date="{{ p.posted_pinterest[:10] if p.posted_pinterest else '' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}" data-name="{{ p.name | lower }}">
+      <div class="product-row" data-pid="{{ p.pid }}" data-category="{{ p.category }}" data-season="{{ p.season }}" data-gender="{{ p.gender }}" data-posted="{{ 'yes' if (p.posted_instagram or p.posted_pinterest) else 'no' }}" data-store="{{ 'yes' if p.added_to_store else 'no' }}" data-store-date="{{ p.added_to_store[:10] if p.added_to_store else '' }}" data-rejected="{{ 'yes' if p.rejected else 'no' }}" data-rejected-date="{{ p.rejected[:10] if p.rejected else '' }}" data-ig-date="{{ p.posted_instagram[:10] if p.posted_instagram else '' }}" data-pin-date="{{ p.posted_pinterest[:10] if p.posted_pinterest else '' }}" data-found="{{ p.found_at[:10] if p.found_at else '' }}" data-name="{{ p.name | lower }}">
         <div class="col-select"><input type="checkbox" class="card-select" data-pid="{{ p.pid }}" data-name="{{ p.name }}" onchange="toggleSelect(this)"></div>
         <div class="col-img">
           <div class="row-img-wrap">{% if p.image %}<img src="{{ p.image }}" alt="{{ p.name }}">{% endif %}</div>
@@ -260,6 +260,10 @@
       <input type="text" id="productSearchInput" class="product-search-input" placeholder="Search your products by name..."
              oninput="onFilterChange()">
 
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);margin:6px 0;cursor:pointer">
+        <input type="checkbox" id="showOnlySelectedCb" onchange="onFilterChange()"> Show only selected (useful after searching + selecting multiple times)
+      </label>
+
       <div class="filter-row">
         <div class="dropdown-filter" id="statusDropdown">
           <button type="button" class="dropdown-toggle" id="statusToggleBtn" onclick="toggleDropdown(event, 'statusPanel')">Status ▾</button>
@@ -270,8 +274,8 @@
             </div>
             <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="unposted" onchange="onFilterChange()"> 📅 Unposted</label>
             <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="posted" onchange="onFilterChange()"> ✓ Posted</label>
-            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="store" onchange="onFilterChange()"> 🏪 In store</label>
             <div style="border-top:1px solid var(--line);margin:6px 0"></div>
+            <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="store" onchange="onFilterChange()"> 🏪 Show added-to-store too</label>
             <label class="dropdown-option"><input type="checkbox" class="status-checkbox" value="rejected" onchange="onFilterChange()"> 🗑 Show rejected too</label>
           </div>
         </div>
@@ -286,6 +290,18 @@
             <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="winter" checked onchange="onFilterChange()"> ❄️ Winter</label>
             <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="summer" checked onchange="onFilterChange()"> ☀️ Summer</label>
             <label class="dropdown-option"><input type="checkbox" class="season-checkbox" value="all" checked onchange="onFilterChange()"> 🌍 Year-round</label>
+          </div>
+        </div>
+
+        <div class="dropdown-filter" id="genderDropdown">
+          <button type="button" class="dropdown-toggle" id="genderToggleBtn" onclick="toggleDropdown(event, 'genderPanel')">Gender ▾</button>
+          <div class="dropdown-panel" id="genderPanel" style="display:none">
+            <div class="dropdown-actions">
+              <a href="#" onclick="setAllInGroup('gender-checkbox', true);return false">Select all</a>
+              <a href="#" onclick="setAllInGroup('gender-checkbox', false);return false">Clear</a>
+            </div>
+            <label class="dropdown-option"><input type="checkbox" class="gender-checkbox" value="women" checked onchange="onFilterChange()"> 👩 Women</label>
+            <label class="dropdown-option"><input type="checkbox" class="gender-checkbox" value="men" checked onchange="onFilterChange()"> 👨 Men</label>
           </div>
         </div>
 
@@ -440,6 +456,7 @@
     </span>
     <button onclick="applyBulkAction(true)">✓ Mark checked</button>
     <button class="clear-btn" onclick="applyBulkAction(false)">↺ Un-mark checked</button>
+    <button class="clear-btn" onclick="bulkMark({rejected: true})">🗑 Reject selected</button>
     <button class="clear-btn" onclick="clearSelection()">Clear</button>
     <span id="captionResult" style="flex-basis:100%;font-size:0.8rem;color:#f0e8e4;white-space:pre-wrap"></span>
   </div>
@@ -456,7 +473,9 @@
 
     const DEFAULT_STATUS = [];
     const DEFAULT_SEASON = ["winter", "summer", "all"];
+    const DEFAULT_GENDER = ["women", "men"];
     const DEFAULT_PAGE_SIZE = 20;
+    let selected = new Map();
     // Every "activity happened on this date" filter - add a new one here (plus its
     // dropdown markup + a data-* attribute on .product-row) and the rest of the
     // filtering code picks it up automatically, so "today's activity" stays easy
@@ -661,10 +680,12 @@
       const params = new URLSearchParams();
       const status = getChecked("status-checkbox");
       const season = getChecked("season-checkbox");
+      const gender = getChecked("gender-checkbox");
       const cats = getChecked("category-checkbox");
       const allCats = getAllValues("category-checkbox");
       if (status.sort().join(",") !== [...DEFAULT_STATUS].sort().join(",")) params.set("status", status.join(","));
       if (season.sort().join(",") !== [...DEFAULT_SEASON].sort().join(",")) params.set("season", season.join(","));
+      if (gender.sort().join(",") !== [...DEFAULT_GENDER].sort().join(",")) params.set("gender", gender.join(","));
       if (cats.length !== allCats.length) params.set("cats", cats.join(","));
       DATE_FILTERS.forEach(f => {
         if (document.querySelector("." + f.checkboxClass)) {
@@ -692,6 +713,10 @@
         const vals = params.get("season").split(",").filter(Boolean);
         document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
       }
+      if (params.has("gender")) {
+        const vals = params.get("gender").split(",").filter(Boolean);
+        document.querySelectorAll(".gender-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
+      }
       if (params.has("cats")) {
         const vals = params.get("cats").split(",").filter(Boolean);
         document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = vals.includes(cb.value));
@@ -713,6 +738,7 @@
     function clearAllFilters() {
       document.querySelectorAll(".status-checkbox").forEach(cb => cb.checked = DEFAULT_STATUS.includes(cb.value));
       document.querySelectorAll(".season-checkbox").forEach(cb => cb.checked = true);
+      document.querySelectorAll(".gender-checkbox").forEach(cb => cb.checked = true);
       document.querySelectorAll(".category-checkbox").forEach(cb => cb.checked = true);
       DATE_FILTERS.forEach(f => document.querySelectorAll("." + f.checkboxClass).forEach(cb => cb.checked = true));
       document.getElementById("productSearchInput").value = "";
@@ -736,6 +762,7 @@
     function applyFilters() {
       const selectedStatus = getChecked("status-checkbox");
       const selectedSeasons = getChecked("season-checkbox");
+      const selectedGenders = getChecked("gender-checkbox");
       const selectedCategories = getChecked("category-checkbox");
       const allCatsSelected = selectedCategories.length === getAllValues("category-checkbox").length;
       const dateFilterStates = DATE_FILTERS.map(f => {
@@ -748,33 +775,41 @@
 
       updateToggleLabel("statusToggleBtn", "status-checkbox", "Status: All", DEFAULT_STATUS);
       updateToggleLabel("seasonToggleBtn", "season-checkbox", "Season: All", DEFAULT_SEASON);
+      updateToggleLabel("genderToggleBtn", "gender-checkbox", "Gender: All", DEFAULT_GENDER);
       updateToggleLabel("categoryToggleBtn", "category-checkbox", "Category: All", getAllValues("category-checkbox"));
 
-      // "Show rejected too" is its own on/off toggle, independent of the
-      // unposted/posted/store narrowing below - a rejected product never
-      // shows just because it happens to also be "unposted", say.
+      // "Show rejected too" / "Show added-to-store too" are their own on/off
+      // toggles, independent of the unposted/posted narrowing below - a
+      // rejected or already-in-store product never shows by default just
+      // because it happens to also be "unposted", say.
       const showRejectedToo = selectedStatus.includes("rejected");
-      const statusNarrowing = selectedStatus.filter(s => s !== "rejected");
+      const showStoreToo = selectedStatus.includes("store");
+      const statusNarrowing = selectedStatus.filter(s => s !== "rejected" && s !== "store");
       const searchQuery = document.getElementById("productSearchInput").value.trim().toLowerCase();
+      const onlySelected = document.getElementById("showOnlySelectedCb").checked;
 
       const allRows = Array.from(document.querySelectorAll("#productGrid .product-row"));
       const matching = allRows.filter(row => {
         const rejected = row.dataset.rejected === "yes";
+        const inStore = row.dataset.store === "yes";
         let statusOk;
         if (rejected) {
           statusOk = showRejectedToo;
+        } else if (inStore) {
+          statusOk = showStoreToo;
         } else if (statusNarrowing.length === 0) {
           statusOk = true; // nothing checked in this group = no narrowing, show all
         } else {
           const labels = [row.dataset.posted === "yes" ? "posted" : "unposted"];
-          if (row.dataset.store === "yes") labels.push("store");
           statusOk = labels.some(l => statusNarrowing.includes(l));
         }
         const categoryOk = allCatsSelected || selectedCategories.includes(row.dataset.category);
         const seasonOk = selectedSeasons.includes(row.dataset.season);
+        const genderOk = selectedGenders.includes(row.dataset.gender);
         const datesOk = dateFilterStates.every(f => !f.has || f.allSelected || f.selected.includes(row.dataset[f.dataAttr]));
         const nameOk = !searchQuery || row.dataset.name.includes(searchQuery);
-        return statusOk && categoryOk && seasonOk && datesOk && nameOk;
+        const selectedOk = !onlySelected || selected.has(row.dataset.pid);
+        return statusOk && categoryOk && seasonOk && genderOk && datesOk && nameOk && selectedOk;
       });
 
       const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
@@ -810,13 +845,13 @@
     applyFromUrl();
     applyFilters();
 
+
+
     const topBtn = document.getElementById("toTopBtn");
     window.addEventListener("scroll", () => {
       topBtn.style.display = window.scrollY > 400 ? "flex" : "none";
     });
     topBtn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-
-    let selected = new Map();
 
     function toggleSelect(checkbox) {
       const pid = checkbox.dataset.pid;
@@ -826,12 +861,14 @@
         selected.delete(pid);
       }
       updateSelectionBar();
+      if (document.getElementById("showOnlySelectedCb").checked) applyFilters();
     }
 
     function clearSelection() {
       selected.clear();
       document.querySelectorAll(".card-select").forEach(cb => cb.checked = false);
       updateSelectionBar();
+      if (document.getElementById("showOnlySelectedCb").checked) applyFilters();
     }
 
     function updateSelectionBar() {

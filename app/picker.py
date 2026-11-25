@@ -71,6 +71,14 @@ _CATEGORY_SEASON_BY_NAME = {c["name"]: c.get("season", "all") for c in CATEGORIE
 def season_for_category(category: str) -> str:
     return _CATEGORY_SEASON_BY_NAME.get(category, "all")
 
+
+# name -> gender, same fallback pattern as season above.
+_CATEGORY_GENDER_BY_NAME = {c["name"]: c.get("gender", "women") for c in CATEGORIES}
+
+
+def gender_for_category(category: str) -> str:
+    return _CATEGORY_GENDER_BY_NAME.get(category, "women")
+
 # listedNum = how many other sellers already carry this exact product on CJ.
 # A real test found a product listed by 7,673 sellers - that's not "proven
 # demand," it's "impossible to differentiate from." Anything past
@@ -146,18 +154,23 @@ def is_cute(name: str, cuteness_keywords: list[str]) -> bool:
 # own, so these words hard-disqualify a product regardless of what else
 # matched (e.g. "Sexy Slim Oblique Shoulder Skirt" matched a cuteness keyword
 # but is clearly off-brand for Mirthovia).
-OFF_BRAND_KEYWORDS = [
-    "sexy", "lingerie", "bodycon", "see-through", "sheer", "fetish", "erotic",
-    # Mirthovia is a girls'/women's cute-aesthetic shop - "men"/"man" is a
-    # whole-word match (see _has_word) so it won't false-positive on
-    # "women"/"woman", which both have a word character right before "man".
-    "men", "man", "boys", "boy",
-]
+OFF_BRAND_KEYWORDS = ["sexy", "lingerie", "bodycon", "see-through", "sheer", "fetish", "erotic"]
+
+# A women's-category scan should exclude men's/boys' listings that slipped in
+# under a unisex keyword, and a men's-category scan should exclude women's/
+# girls' ones - each is a whole-word match (see _has_word) so "men" won't
+# false-positive on "women"/"woman", which both have a word character right
+# before "man".
+OPPOSITE_GENDER_KEYWORDS = {
+    "women": ["men", "man", "boys", "boy"],
+    "men": ["women", "woman", "girls", "girl"],
+}
 
 
-def is_off_brand(name: str) -> bool:
+def is_off_brand(name: str, gender: str = "women") -> bool:
     lname = (name or "").lower()
-    return any(_has_word(lname, word) for word in OFF_BRAND_KEYWORDS)
+    keywords = OFF_BRAND_KEYWORDS + OPPOSITE_GENDER_KEYWORDS.get(gender, [])
+    return any(_has_word(lname, word) for word in keywords)
 
 
 def _cheapest_shipping(client: CJClient, vid: str, destination_country: str):
@@ -180,6 +193,7 @@ def _score_product(
     log,
     saturation_threshold: int = SATURATED_THRESHOLD,
     season: str = "all",
+    gender: str = "women",
 ) -> dict | None:
     pid = p.get("id")
     name = p.get("nameEn") or ""
@@ -240,6 +254,7 @@ def _score_product(
         "name": name,
         "category": category_name,
         "season": season,
+        "gender": gender,
         "image": p.get("bigImage"),
         "has_video": bool(p.get("isVideo")),
         "product_url": product_url_for(pid, name),
@@ -305,14 +320,16 @@ def run_scan(
 
             cat_threshold = cat.get("saturation_threshold", SATURATED_THRESHOLD)
             must_contain_any = cat.get("must_contain_any")
+            must_not_contain_any = cat.get("must_not_contain_any")
             filtered = [
                 p for p in raw
                 if (cat.get("allow_seasonal") or not is_seasonal(p.get("nameEn")))
-                and not is_off_brand(p.get("nameEn"))
+                and not is_off_brand(p.get("nameEn"), gender=cat.get("gender") or gender_for_category(cat["name"]))
                 and is_relevant(p.get("nameEn"), kw)
                 and (cat.get("require_cute", True) is False or is_cute(p.get("nameEn"), cuteness_keywords))
                 and int(p.get("listedNum") or 0) < cat_threshold
                 and (not must_contain_any or any(_has_word((p.get("nameEn") or "").lower(), w) for w in must_contain_any))
+                and (not must_not_contain_any or not any(_has_word((p.get("nameEn") or "").lower(), w) for w in must_not_contain_any))
             ]
             log(f"    {len(raw)} returned, {len(filtered)} passed seasonal+off-brand+relevance+cuteness+competition filters")
             # Only ~per_keyword_limit of these actually get scored (CJ's
@@ -362,6 +379,7 @@ def run_scan(
                 client, p, cat["name"], destination_countries, log,
                 saturation_threshold=cat.get("saturation_threshold", SATURATED_THRESHOLD),
                 season=cat.get("season") or season_for_category(cat["name"]),
+                gender=cat.get("gender") or gender_for_category(cat["name"]),
             )
             if scored:
                 enriched.append(scored)
